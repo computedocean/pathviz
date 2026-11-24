@@ -246,6 +246,23 @@ func TestFilter(t *testing.T) {
 	}
 }
 
+func TestInstallProbesExplainsMissingNftLogSupport(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to execute nft")
+	}
+	err := InstallProbes(Ruleset(Filter{Proto: "any"}, 77, nil))
+	if err == nil {
+		_ = RemoveProbes()
+		t.Skip("kernel supports nft log group rules")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "log group") && strings.Contains(msg, "No such file or directory") {
+		if !strings.Contains(msg, "modprobe nft_log") || !strings.Contains(msg, "modprobe nfnetlink_log") {
+			t.Fatalf("missing remediation in error: %s", msg)
+		}
+	}
+}
+
 func TestToken(t *testing.T) {
 	app := &App{token: "secret", packetView: true, subs: map[chan []byte]bool{}}
 	h := app.Handler()

@@ -433,7 +433,15 @@ func nft(stdin string, args ...string) error {
 
 // InstallProbes loads the ruleset, replacing a previous pathviz table if any.
 func InstallProbes(ruleset string) error {
-	return nft(ruleset, "-f", "-")
+	err := nft(ruleset, "-f", "-")
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "log group") && strings.Contains(msg, "No such file or directory") {
+		return fmt.Errorf("%w\n\nThe kernel rejected nftables NFLOG rules (\"log group ...\"). PathViz needs nft logging support to trace packets.\n\nTry:\n  sudo modprobe nft_log\n  sudo modprobe nfnetlink_log\n\nIf those modules are unavailable (common on some WSL kernels), run PathViz on a Linux VM/host with nft logging support", err)
+	}
+	return err
 }
 
 // RemoveProbes deletes the pathviz table. A missing table is not an error.
