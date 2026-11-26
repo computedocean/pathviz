@@ -56,6 +56,9 @@ const state = {
   selected: null,   // the item the diagram shows
   live: true,       // new items are played as they come
   queue: [],        // items that wait to be played
+  paused: false,    // the page is frozen: nothing new is listed or played
+  held: [],         // the packets that arrived during the pause, oldest first
+  missed: 0,        // the packets that found no room in it and were not kept
   playing: false,
   animEnd: 0,       // when the running animation ends
   redrawTimer: null,
@@ -202,6 +205,7 @@ function chrome() {
   svg.setAttribute('aria-label', v.aria);
   $('#packets thead').replaceChildren(html('tr', {}, ...v.columns.map((c) => html('th', {}, c)), html('th', { 'aria-label': 'Packet contents' })));
   setLive(state.live);
+  showPause();
   document.title = `PathViz on ${store.hostName || '…'}`;
 }
 
@@ -462,7 +466,7 @@ function select(item, animate) {
 
 // play shows the waiting items one after another.
 function play() {
-  if (state.playing || !state.live) return;
+  if (state.playing || !state.live || state.paused) return;
   // When packets arrive faster than they can be drawn, skip to the recent ones.
   if (state.queue.length > 4) state.queue = state.queue.slice(-2);
   const item = state.queue.shift();
@@ -482,18 +486,92 @@ function setLive(on) {
 
 const shown = (j) => !embed || journeyMatches(j, state.filter);
 
-function onJourney(j) {
+// ingest lists a traced packet and returns the items the view made of it.
+function ingest(j) {
   state.journeys.push(j);
   if (state.journeys.length > MAX_ROWS) state.journeys.shift();
-  if (!shown(j)) return;
-  for (const item of view().items(j)) {
+  if (!shown(j)) return [];
+  const added = view().items(j);
+  for (const item of added) {
     state.items.push(item);
     if (state.items.length > MAX_ROWS) state.items.shift();
     addRow(item);
-    if (state.live) state.queue.push(item);
   }
   counts();
+  return added;
+}
+
+function onJourney(j) {
+  // During a pause the packets wait. When as many wait as the list holds,
+  // the later ones are not kept: Step then still shows what came right after
+  // the pause, with no gap in it.
+  if (state.paused) {
+    if (state.held.length < MAX_ROWS) state.held.push(j);
+    else state.missed++;
+    showPause();
+    return;
+  }
+  const added = ingest(j);
+  if (state.live) state.queue.push(...added);
   play();
+}
+
+// ---- Pause -------------------------------------------------------------------
+
+// A pause freezes the diagram and the lists of packets. What arrives meanwhile
+// waits, and is listed on Resume, or one by one with Step. It is not the same
+// as not following: without following the list still grows.
+function showPause() {
+  const waiting = state.held.length + state.queue.length;
+  const pause = $('#pause-btn');
+  pause.setAttribute('aria-pressed', String(state.paused));
+  pause.textContent = state.paused ? 'Resume' : 'Pause';
+  pause.title = state.paused ? `List and play the ${view().noun}s that arrived meanwhile` : `Freeze the diagram and the tables. New ${view().noun}s wait until Resume or Step`;
+  const step = $('#step-btn');
+  step.disabled = !state.paused || waiting === 0;
+  step.title = state.paused ? `Show the next ${view().noun} that waits` : 'Pause first, then step through what arrives';
+  // The count has a place of its own after the controls, so that they stay put
+  // while it changes.
+  const note = $('#held-note');
+  note.classList.toggle('full', state.missed > 0);
+  note.textContent = !state.paused ? '' : !waiting ? 'Paused' : state.missed
+    ? `Full · ${state.missed} dropped`
+    : `${waiting} waiting`;
+  note.title = state.missed
+    ? `${MAX_ROWS} ${view().noun}s wait, and that is the limit: the ${state.missed} that arrived after them were dropped. Resume or Step to make room.`
+    : `Up to ${MAX_ROWS} ${view().noun}s wait during a pause. The ones that arrive after that are dropped.`;
+}
+
+function setPaused(on) {
+  state.paused = on;
+  if (on) {
+    // The running animation ends right away: the path is drawn in full.
+    if (state.selected) select(state.selected, false);
+  } else {
+    const held = state.held;
+    state.held = [];
+    state.missed = 0;
+    for (const j of held) {
+      const added = ingest(j);
+      if (state.live) state.queue.push(...added);
+    }
+    play();
+  }
+  showPause();
+}
+
+// step shows the next waiting packet. A packet that the view lists nothing of
+// (an ARP frame in the IP view) is taken in and skipped.
+function step() {
+  if (!state.paused) return;
+  let item = state.queue.shift();
+  while (!item && state.held.length) {
+    const added = ingest(state.held.shift());
+    item = added.shift();
+    state.queue.push(...added);
+  }
+  if (item) select(item, true);
+  showPause();
 }
 
 // relist lists the traced packets anew, the way the current view shows them,
@@ -510,6 +588,8 @@ function relist() {
 
 function clearAll() {
   state.journeys = [];
+  state.held = [];
+  state.missed = 0;
   relist();
 }
 
@@ -693,6 +773,8 @@ async function connect() {
         showFilter(d.filter);
         chrome();
         state.journeys = d.journeys || [];
+        state.held = [];
+        state.missed = 0;
         relist();
         break;
       }
@@ -716,8 +798,10 @@ async function connect() {
 
 $('#live-btn').addEventListener('click', () => {
   setLive(!state.live);
-  if (state.live && state.items.length) select(state.items[state.items.length - 1], true);
+  if (state.live && state.items.length && !state.paused) select(state.items[state.items.length - 1], true);
 });
+$('#pause-btn').addEventListener('click', () => setPaused(!state.paused));
+$('#step-btn').addEventListener('click', step);
 
 $('#clear-btn').addEventListener('click', () => post('api/clear', {}));
 

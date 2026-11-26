@@ -102,11 +102,18 @@
       <span id="panel-switch" class="toggles" role="group" aria-label="Tables to show"></span>
       <span id="block-switch" class="menus"></span>
     </span>
+    <span class="vsep" aria-hidden="true"></span>
+    <span class="group">
+      <button type="button" id="pause-btn" class="pause" aria-pressed="false"></button>
+      <button type="button" id="step-btn" class="step" disabled>Step</button>
+    </span>
     <label class="group">
       <span class="lbl">Speed</span>
       <select id="speed-select" class="speed-select" aria-label="How fast a packet travels through the diagram"></select>
     </label>
-    <span class="spacer"></span>
+    <!-- How many packets wait during a pause. It fills the room that is left
+         before the connection badge, so it never moves or wraps the controls. -->
+    <span id="held-note" class="held" role="status"></span>
     <span id="conn" class="conn" title="Connection to PathViz">Connecting</span>
     </div>
   </div>
