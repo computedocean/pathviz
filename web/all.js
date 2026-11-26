@@ -139,7 +139,11 @@ const X = {
 const NIC = { w: 148, h: 34, step: 42, max: 8 };
 const PROC = { w: 180, h: 40, gap: 12, max: 5 };
 const BOX = { w: 150, h: 44, small: 110 };
-const LANE_GAP = 120, SOCK_H = 22, BAR_H = 26;
+const LANE_GAP = 156, SOCK_H = 22, BAR_H = 26;
+// Every lane is on a band with its name in the top left corner. TOP is the
+// room for the name above what the band holds, and BAND_X is where a band
+// starts: between the line that goes around the side and the cards.
+const TOP = 34, BAND_X = 36;
 // The chips of the stages inside an IP hook, in the look "Stages".
 const CHIP = { w: 52, h: 24, dx: 58, dy: 38 };
 const withStages = () => ctx.sub() === 'stages';
@@ -188,20 +192,20 @@ function build() {
   // The rows, from the top: the processes, the sockets, the IP lane (its cards
   // stack upwards), the bridge lane (its cards stack downwards), and the bar
   // of the bridge device.
-  const sockY = 8 + PROC.h + 18;
+  const sockY = TOP + PROC.h + 18;
   const cardsUp = (Math.max(cards3.length, 1) - 1) * NIC.step + NIC.h / 2 + 26 + (more3 ? 18 : 0);
   let y3 = 0, y2 = 0, barY = 0, height = 0;
   if (has3) {
     // With the stages, INPUT and OUTPUT are columns of chips and need more height.
-    y3 = Math.max(on.has('l3') ? sockY + SOCK_H + (withStages() ? 246 : 150) : 44, cardsUp + 4);
+    y3 = Math.max(on.has('l3') ? sockY + SOCK_H + (withStages() ? 246 : 150) : 44, cardsUp + TOP);
     // Room for the name of the lane under its line.
-    height = y3 + (on.has('l3') ? 56 : 34);
+    height = y3 + 54;
   }
   if (has2) {
-    y2 = has3 ? y3 + LANE_GAP : 44;
+    y2 = has3 ? y3 + LANE_GAP : 84;
     const cardsDown = (Math.max(cards2.length, 1) - 1) * NIC.step + NIC.h / 2 + (more2 ? 20 : 0);
     barY = y2 + Math.max(150, cardsDown + 26);
-    height = barY + BAR_H + 22;
+    height = barY + BAR_H + 26;
   }
   svg.setAttribute('viewBox', `0 0 ${X.W} ${height}`);
   setWidth(svg, X.W, 1240);
@@ -210,6 +214,13 @@ function build() {
 
   S = { on, y3, y2, barY, sockY, nodes: new Map(), edges: new Map(), cards: { 2: { in: {}, out: {} }, 3: { in: {}, out: {} } }, procs: {}, subs: [], has2, has3 };
   const tracks = el('g'), trails = el('g'), parts = el('g'), marks = el('g');
+  // The bands of the lanes: what belongs to the IP stack and what to the bridge.
+  const band = (top, bottom, name) => svg.append(
+    el('rect', { class: 'lane', x: BAND_X, y: top, width: X.W - 2 * BAND_X, height: bottom - top, rx: 10 }),
+    el('text', { class: 'lane-name', x: BAND_X + 12, y: top + 17 }, name),
+  );
+  if (has3) band(2, y3 + 50, on.has('l3') ? 'IP · L3' : 'Devices');
+  if (has2) band(y2 - 78, barY + BAR_H + 22, 'Bridge · L2');
   svg.append(tracks, trails, parts, marks);
   const track = (pts, cls = '') => tracks.append(el('path', { class: `track ${cls}`, d: linePath(pts) }));
   const arrow = (x, y, rot) => tracks.append(el('path', { class: 'arrow', d: 'M-6 -5 L5 0 L-6 5 Z', transform: `translate(${x} ${y}) rotate(${rot})` }));
@@ -231,9 +242,16 @@ function build() {
     const at = (i) => [x + dx * (i - (n - 1) / 2), y + dy * (i - (n - 1) / 2)];
     const halfW = Math.abs(dx) * (n - 1) / 2 + CHIP.w / 2 + 10, halfH = Math.abs(dy) * (n - 1) / 2 + CHIP.h / 2 + 12;
     parts.append(el('rect', { class: 'hookbox', x: x - halfW, y: y - halfH, width: 2 * halfW, height: 2 * halfH, rx: 10 }));
-    if (dx) parts.append(el('text', { class: 'hookname', x, y: y - halfH - 8, 'text-anchor': 'middle' }, name));
-    else if (name === 'INPUT') parts.append(el('text', { class: 'hookname', x: x - halfW - 10, y: y + 4, 'text-anchor': 'end' }, name));
-    else parts.append(el('text', { class: 'hookname', x: x + halfW + 10, y: y + 4 }, name));
+    // The name of the hook with its nftables family under it, as in the other
+    // boxes: above a row of chips, and next to a column of them.
+    const [tx, ty, anchor] = dx ? [x, y - halfH - 23, 'middle'] : name === 'INPUT' ? [x - halfW - 10, y - 3, 'end'] : [x + halfW + 10, y - 3, 'start'];
+    const title = el('text', { class: 'hookname', x: tx, y: ty, 'text-anchor': anchor }, name);
+    parts.append(title);
+    // The family is centered under the name, wherever the name is anchored,
+    // as far below it as the second line of a hook box (see drawHook).
+    const half = title.getComputedTextLength() / 2;
+    const mid = anchor === 'end' ? tx - half : anchor === 'start' ? tx + half : tx;
+    parts.append(el('text', { class: 'family', x: mid, y: ty + 15, 'text-anchor': 'middle' }, 'inet'));
     const chips = {};
     names.forEach((stage, i) => {
       const [cx, cy] = at(i);
@@ -249,8 +267,15 @@ function build() {
   const hook = (key, x, y, name, layer, small) => {
     if (layer === 'l3' && on.has('l3') && withStages()) { stageHook(key, x, y, name, CHIP.dx, 0); return; }
     if (!on.has(layer)) { point(key, x, y); return; }
-    const g = drawHook(parts, x, y, name, small ? 'device hook' : '', small ? BOX.small : BOX.w, BOX.h);
-    if (small) S.subs.push(g.querySelector('.hooksub'));
+    // The second line of a box is the nftables family of its hook. Under a
+    // device hook is the name of the device of the packet on view.
+    const g = drawHook(parts, x, y, name, small ? 'netdev' : layer === 'l2' ? 'bridge' : 'inet', small ? BOX.small : BOX.w, BOX.h);
+    if (small) {
+      const dev = el('text', { class: 'devname', x, y: y + BOX.h / 2 + 19, 'text-anchor': 'middle' });
+      parts.append(dev);
+      S.subs.push(dev);
+      g.dev = dev;
+    }
     point(key, x, y, g, true);
   };
   const circle = (x, y) => { const c = el('circle', { class: 'node', cx: x, cy: y, r: 8 }); parts.append(c); return c; };
@@ -333,7 +358,7 @@ function build() {
       label(X.DEC + 14, y3 - 30, 'routing', 'start');
       const rowW = procs.length * (PROC.w + PROC.gap) - PROC.gap;
       procs.forEach((proc, i) => {
-        const x = (X.in + X.out - rowW) / 2 + i * (PROC.w + PROC.gap), y = 8;
+        const x = (X.in + X.out - rowW) / 2 + i * (PROC.w + PROC.gap), y = TOP;
         tracks.append(el('path', { class: 'track thin', d: `M${x + PROC.w / 2} ${y + PROC.h} V${sockY}` }));
         const g = el('g', { class: 'nic' });
         const portsText = proc.sockets.map((s) => `${s.proto} :${s.port}`).join('  ');
@@ -347,11 +372,10 @@ function build() {
         parts.append(g);
         S.procs[proc.pid] = { el: g, cx: x + PROC.w / 2, bottom: y + PROC.h };
       });
-      if (moreProcs) label((X.in + X.out + rowW) / 2 + 14, 8 + PROC.h / 2 + 4, `and ${moreProcs} more`, 'start');
+      if (moreProcs) label((X.in + X.out + rowW) / 2 + 14, TOP + PROC.h / 2 + 4, `and ${moreProcs} more`, 'start');
       if (!procs.length) label((X.in + X.out) / 2, sockY - 10, store.host.procs.length ? 'The processes are switched off (Show, Processes).' : 'No process listens on a TCP or UDP port.');
     }
     cards(3, y3, cards3, more3, -1, { in: 'Devices: arriving on', out: 'Devices: leaving through' });
-    if (on.has('l3')) label(X.DEC, y3 + 40, 'IP hooks');
   }
 
   if (has2) {
@@ -367,7 +391,6 @@ function build() {
     if (on.has('l2')) {
       arrow(X.DEC, (y2 + mid - BOX.h / 2) / 2 + 4, 90);
       arrow(X.MRG, (y2 + mid - BOX.h / 2) / 2 - 4, -90);
-      label(X.DEC, y2 - (has3 ? 30 : 34), 'Bridge hooks');
     }
     cards(2, y2, cards2, more2, 1, { in: 'Ports: arriving on', out: 'Ports: leaving through' });
   }
@@ -380,7 +403,7 @@ function build() {
       S.edges.get(`${n}3`).push(`${n}2`);
       if (on.has('l2') && on.has('l3')) track([[X[n], y2 - BOX.h / 2], [X[n], y3 + (withStages() ? CHIP.h / 2 + 12 : BOX.h / 2)]], 'loop');
     }
-    if (on.has('l2') && on.has('l3')) label(X.FWD + 10, (y2 + y3) / 2 + 4, 'br_netfilter', 'start');
+    if (on.has('l2') && on.has('l3')) label(X.FWD + 10, y3 + 68, 'br_netfilter', 'start');
     // The bridge devices are among the devices of the IP lane. The bar of the
     // bridge lane is joined to their cards around both sides.
     const loopY = barY + BAR_H / 2;
@@ -543,8 +566,7 @@ function trace(j, p) {
       if (stopped) stop.mark = [n.at[0] + (box.layer === 'l1' ? BOX.small : BOX.w) / 2 - 4, n.at[1] - BOX.h / 2 + 4];
     }
     // The device hook tells which device it is of this time.
-    const sub = n.el && n.el.querySelector('.hooksub');
-    if (sub && box.layer === 'l1') stop.sub = [sub, h.in || h.out];
+    if (n.el && n.el.dev) stop.sub = [n.el.dev, h.in || h.out];
     prev = s;
     last = { box, key, k, hop: lastHop };
   });
@@ -590,7 +612,7 @@ function trace(j, p) {
       const when = T.timeAt(at, dist);
       if (x.node) T.light(x.node, when, x.cls);
       if (x.mark) T.stop(x.mark, when);
-      if (x.sub) T.later(when, () => { x.sub[0].textContent = short(x.sub[1], 16); });
+      if (x.sub) T.later(when, () => { x.sub[0].textContent = x.sub[1]; });
     });
     at = t.done;
     from = to;
@@ -606,7 +628,7 @@ function show(item, animate) {
   }
   if (!S || !T) return 0;
   T.reset(animate);
-  for (const sub of S.subs) sub.textContent = 'device hook';
+  for (const sub of S.subs) sub.textContent = '';
   if (!j) return 0;
   const p = plan(j, leaf, S.on);
   return p.seq.length ? trace(j, p) : 0;

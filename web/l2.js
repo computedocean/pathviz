@@ -286,7 +286,8 @@ function buildHooks(svg, bridge) {
   svg.append(stackBox);
   G.stack = stack;
 
-  const hook = (name, x, hy) => { G.hooks[name] = { el: drawHook(svg, x, hy, name), pos: [x, hy] }; };
+  // The second line is the nftables family: the same hooks exist for IP.
+  const hook = (name, x, hy) => { G.hooks[name] = { el: drawHook(svg, x, hy, name, 'bridge'), pos: [x, hy] }; };
   hook('PREROUTING', H.preX, y);
   hook('FORWARD', H.fwdX, y);
   hook('POSTROUTING', H.postX, y);

@@ -529,8 +529,12 @@ body:not(.embed) .nic:hover rect, body:not(.embed) .procbody:hover rect, body:no
 .hook.lit .hooksub { fill: var(--panel); }
 .node.unknown { stroke-dasharray: 3 3; }
 /* The lanes of the combined view: one per layer. */
-.lane { fill: var(--chip); opacity: .45; }
-.lane-name { font: 650 12px var(--sans); fill: var(--ink); letter-spacing: 0.04em; }
+.lane { fill: var(--chip); fill-opacity: .6; stroke: var(--line); stroke-width: 1; }
+.lane-name { font: 650 11px var(--sans); fill: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+/* The device of the packet on view, under the device hook it crossed. */
+.devname { font: 600 11.5px var(--mono); fill: var(--lit); }
+/* The nftables family next to the name of a hook. */
+.family { font: 10.5px var(--mono); fill: var(--muted); letter-spacing: 0; }
 /* The trails of a packet: several at once when a bridge copied the frame. */
 .trail { fill: none; stroke: var(--lit); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
 .trail.flood { stroke: var(--nat); }
