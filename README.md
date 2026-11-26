@@ -15,11 +15,21 @@ The page has one view per layer, and one that puts them together. The switch is 
 | **IP · L3** | The five netfilter hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), the interfaces around them, and the processes behind the sockets. The look "Stages" also shows the raw, mangle, nat, and filter stages inside every hook, and "Hooks only" draws one box per hook. |
 | **Bridge · L2** | What a Linux bridge does with a frame. The look "Topology" draws the bridge, its ports, and what is behind each port: a container, a pod, a namespace, another bridge. The look "Hooks" draws the five hooks of the bridge family, with one trail per copy of a flooded frame. The bridge's MAC table is next to it. |
 | **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where netfilter sees a frame. |
-| **Combined** | One packet across all the layers, in the order it crossed the hooks. Use it to follow a packet from the device it arrived on up to a socket, or to see the IP hooks run inside the bridge hooks when `br_netfilter` is loaded. The layers can be switched on and off one by one. |
+| **Combined** | One packet across all the layers, on one fixed diagram: the IP hooks between the devices, the bridge hooks between the ports below them, and the device hooks at the ends of both. A frame that a bridge passes up goes around the side, through the bridge device, into the IP hooks. With `br_netfilter` loaded, the path also jumps from a bridge hook to the IP hook of the same name and back. The layers can be switched on and off one by one. |
 
 Every view has a **Namespace** list: PathViz can watch any network namespace of the machine, and the list names them after their containers, pods, or `ip netns` names.
 
 In every diagram, a click on a device, a port, a process, or a hook traces only its traffic, and a second click goes back to tracing everything. A click with Ctrl or Cmd adds to what is traced, or takes one thing out of it. The **Show** controls switch off tables, and single devices, bridges, and processes of a diagram. They change what is drawn, not what is traced.
+
+A **Preset** sets the filter, the layers, and the devices and processes of the diagrams for a common setup in one pick. Everything it sets can be changed afterwards.
+
+| Preset | Traces | Shows |
+|---|---|---|
+| Everything | All traffic | All layers, every device and process |
+| Local processes | IPv4 | The IP hooks, without bridges and their ports |
+| Router | IPv4 | The device and IP hooks, without loopback, bridges, and processes |
+| Container host | ARP and IPv4 | All layers, without loopback |
+| Bridge only | ARP, IPv4, and other non-IPv6 frames | The device and bridge hooks, with the bridges and their ports only |
 
 ## How it works
 

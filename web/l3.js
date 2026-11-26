@@ -1,7 +1,7 @@
 // The IP hooks (L3): the five netfilter hooks with their classic stages, the
 // interfaces around them, and the processes behind the sockets.
 
-import { $, el, embed, listParam, playback, reducedMotion, store, svgButton, tracedTag, clock, micros, emptyFilter, filterHas } from './core.js';
+import { $, el, embed, listParam, playback, reducedMotion, store, svgButton, tracedTag, procKey, clock, micros, emptyFilter, filterHas } from './core.js';
 
 // The page calls ctx to learn the look that is on and to change the filter.
 let ctx = null;
@@ -234,10 +234,6 @@ function layoutCounts() {
   const ifaces = store.host.ifaces.filter(ifaceShown).length;
   return [Math.min(ifaces, 7), store.host.procs.filter(procShown).length + S.extras.length, ifaces > 7];
 }
-
-// procKey names a process in the list of the blocks to show. A pid changes
-// with every restart, so the name and the ports stand for the process.
-const procKey = (proc) => `${proc.name} ${proc.sockets.map((s) => `:${s.port}`).join(' ')}`;
 
 // The URL can limit the cards (?ifaces=, ?procs=), and the Show menus of the
 // header switch single ones off.

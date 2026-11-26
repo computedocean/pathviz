@@ -236,6 +236,10 @@ export function peerName(dev) {
   return dev.peer.name;
 }
 
+// procKey names a process in the list of the blocks to show. A pid changes
+// with every restart, so the name and the ports stand for the process.
+export const procKey = (proc) => `${proc.name} ${proc.sockets.map((s) => `:${s.port}`).join(' ')}`;
+
 export const ifaceByName = (name) => store.host.ifaces.find((i) => i.name === name) || null;
 
 // ---- Drawing -----------------------------------------------------------------
@@ -309,9 +313,13 @@ export function drawHook(parent, x, y, name, sub, w = 150, h = 44) {
 }
 
 // setWidth gives a diagram its natural width: a box that is too narrow for it
-// scrolls sideways. An embedded view scales the diagram to its box instead.
-export function setWidth(svg, width) {
-  svg.style.width = embed ? '' : `${width}px`;
+// scrolls sideways. With min, the diagram first shrinks with its box, down to
+// that width. An embedded view scales the diagram to its box instead.
+export function setWidth(svg, width, min) {
+  if (embed) { svg.style.width = ''; return; }
+  svg.style.width = min ? '100%' : `${width}px`;
+  svg.style.maxWidth = min ? `${width}px` : '';
+  svg.style.minWidth = min ? `${min}px` : '';
 }
 
 export const linePath = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join(' ');

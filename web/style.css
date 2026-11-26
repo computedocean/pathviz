@@ -650,7 +650,7 @@ body.embed { background: var(--paper); }
 /* Of the header, an embed keeps the controls of the view only: the switch
    between the path and the tables, the speed, and the connection badge. */
 .embed .bar { padding: 8px 10px 0; background: none; border: 0; }
-.embed .brandline, .embed .filter, .embed .rowname, .embed #clear-btn, .embed .lower { display: none; }
+.embed .brandline, .embed .filter, .embed .rowname, .embed #preset-group, .embed #clear-btn, .embed .lower { display: none; }
 .embed .row { display: block; margin: 0; padding: 0; border: 0; }
 /* The side padding belongs to the diagram's scroll box and to the outcome line,
    so a diagram that does not fit scrolls from edge to edge of the embed. */

@@ -5,13 +5,14 @@
 
 import {
   $, html, params, listParam, setParam, embed, store, emptyFilter, api, apiPath, post, getToken, keepToken,
-  playback, SPEED_STEPS, spaceLabel, journeyMatches, sameFilter, filterHas, filterWith, filterWithout, describeFilter,
+  playback, SPEED_STEPS, spaceLabel, procKey, journeyMatches, sameFilter, filterHas, filterWith, filterWithout, describeFilter,
 } from './core.js';
 import l3 from './l3.js';
 import l2 from './l2.js';
 import l1 from './l1.js';
 import all from './all.js';
 import { openPacket } from './packet.js';
+import { PRESETS } from './presets.js';
 
 const VIEWS = [l3, l2, l1, all];
 const MAX_ROWS = 300;
@@ -156,6 +157,7 @@ function chrome() {
   $('#layer-switch').replaceChildren(...ALL_LAYERS.filter((l) => store.layers.includes(l) || !store.layers.length).reverse().map((l) => switchButton(l.toUpperCase(), state.layers.includes(l), () => {
     const next = state.layers.includes(l) ? state.layers.filter((x) => x !== l) : ALL_LAYERS.filter((x) => x === l || state.layers.includes(x));
     if (!next.length) return; // one layer stays on
+    dropPreset();
     state.layers = next;
     setParam('layers', next.length === ALL_LAYERS.length ? null : next.join(','));
     save();
@@ -268,6 +270,7 @@ function showBlocks() {
       ns[b.id] = keys;
       if (!keys.length) delete ns[b.id];
       if (!Object.keys(ns).length) delete state.off[store.netns];
+      dropPreset();
       save();
       showBlocks();
       rebuild(false);
@@ -415,6 +418,8 @@ function tabs() {
 function rebuild(animate) {
   svg.replaceChildren();
   svg.style.width = '';
+  svg.style.maxWidth = '';
+  svg.style.minWidth = '';
   svg.classList.remove('compact', 'tall');
   view().build();
   const ms = view().show(state.selected, animate);
@@ -522,6 +527,7 @@ function showFilter(f) {
   // The line is cut short when it does not fit: the tooltip has all of it.
   $('#tracing').textContent = describeFilter(state.filter);
   $('#tracing').title = describeFilter(state.filter);
+  if (preset && !sameFilter({ ...emptyFilter(), ...preset.filter }, store.capture)) dropPreset();
   markDirty();
 }
 
@@ -751,6 +757,47 @@ $('#theme-btn').addEventListener('click', () => {
 });
 systemDark.addEventListener('change', showTheme);
 showTheme();
+
+// ---- Presets -------------------------------------------------------------------
+
+// A preset sets the filter, the layers of the combined view, and the devices
+// and processes of the diagrams (see presets.js). The list shows the preset
+// while nothing of it was changed by hand.
+const presetSelect = $('#preset-select');
+presetSelect.append(new Option('Custom', ''), ...PRESETS.map((x) => { const o = new Option(x.label, x.id); o.title = x.about; return o; }));
+let preset = null;
+
+function showPreset() {
+  presetSelect.value = preset ? preset.id : '';
+  presetSelect.title = preset ? preset.about : 'A filter and a look for a common setup';
+}
+
+// dropPreset tells the list that a thing the preset had set was changed.
+function dropPreset() {
+  preset = null;
+  showPreset();
+}
+
+presetSelect.addEventListener('change', () => {
+  preset = PRESETS.find((x) => x.id === presetSelect.value) || null;
+  showPreset();
+  if (!preset) return;
+  const layers = preset.layers.filter((l) => store.layers.includes(l));
+  if (layers.length) state.layers = layers;
+  setParam('layers', state.layers.length === ALL_LAYERS.length ? null : state.layers.join(','));
+  const off = {
+    devices: store.host.ifaces.filter((d) => !preset.device(d)).map((d) => d.name),
+    procs: preset.procs ? [] : store.host.procs.map(procKey),
+  };
+  for (const k of Object.keys(off)) if (!off[k].length) delete off[k];
+  if (Object.keys(off).length) state.off[store.netns] = off;
+  else delete state.off[store.netns];
+  save();
+  chrome();
+  rebuild(false);
+  applyFilter({ ...emptyFilter(), ...preset.filter });
+});
+showPreset();
 
 const speedSelect = $('#speed-select');
 for (const rate of SPEED_STEPS) speedSelect.append(new Option(`x${rate}`, String(rate)));

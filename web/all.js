@@ -1,14 +1,25 @@
-// The combined view: one packet across all the layers that saw it. The hooks
-// are laid out in the order the packet crossed them, each in the lane of its
-// layer: the device hooks at the bottom, the bridge hooks in the middle, and
-// the IP hooks at the top. A hook that calls the hooks of another layer while
-// the packet is in it (as a bridge hook does with br_netfilter) is drawn as a
-// wide box, with the called hooks above it.
+// The combined view: one packet across all the layers that saw it, on a
+// diagram that stays the same from packet to packet.
+//
+// The diagram has two lanes with the same hooks, one above the other. The upper
+// one is the IP stack, between the devices it receives on and sends through.
+// The lower one is the bridge, between its ports. Every lane starts with the
+// ingress hook of its device and ends with the egress hook of it. Two things
+// join the lanes:
+//   - the bridge device (br0): a frame that the bridge passes up (INPUT) goes
+//     around the left side and enters the IP lane like a packet from any other
+//     device, and what the IP stack sends to the bridge device goes around the
+//     right side to the bridge's OUTPUT;
+//   - br_netfilter: a bridge hook calls the IP hook of the same name while the
+//     frame is in it. The dashed links between the lanes are these calls.
+// The way of a packet is found on this diagram as on a map: from every hook
+// that saw it to the next one, along the lines.
 
-import { el, setWidth, store, clock, micros, stackName, peerName, ifaceByName, tracer, pickable } from './core.js';
+import { el, setWidth, store, clock, micros, short, stackName, peerName, ifaceByName, procKey, linePath, drawHook, tracer, pickable } from './core.js';
 
 let ctx = null;
 let T = null;
+let S = null;      // the drawn diagram: its lanes, cards, and the map of its lines
 let shown = null;  // the journey on view
 let leaf = 0;      // the copy of it that the diagram follows
 
@@ -17,7 +28,6 @@ const LANES = [
   { layer: 'l2', label: 'Bridge hooks', short: 'L2' },
   { layer: 'l1', label: 'Device hooks', short: 'L1' },
 ];
-const COL = 172, BOX_W = 144, BOX_H = 46, LANE_H = 104, LEFT = 150, TOP = 26, END = 96;
 
 // leaves are the copies that no bridge copied further: the ends of the paths.
 function leaves(j) {
@@ -77,32 +87,6 @@ function plan(j, leafId, on) {
   return { boxes, seq, cols: col + 1 };
 }
 
-function boxSub(box) {
-  const h = box.first;
-  if (box.layer === 'l1') return h.in || h.out;
-  if (box.layer === 'l2') {
-    if (box.hook === 'PREROUTING') return `${h.bridge} · from ${h.in}`;
-    if (box.hook === 'INPUT') return `${h.bridge} · up`;
-    return `${h.bridge} · to ${h.out}`;
-  }
-  const last = box.hops[box.hops.length - 1].h;
-  return [h.pin || h.in, last.pout || last.out].filter(Boolean).join(' → ');
-}
-
-// boxPick tells what a click on a box traces: the device the packet was on when
-// it crossed the hook.
-function boxPick(box) {
-  const h = box.first;
-  const last = box.hops[box.hops.length - 1].h;
-  const arriving = (dev) => (dev ? [{ ifaces: [`in:${dev}`] }, `what arrives on ${dev}`] : null);
-  const leaving = (dev) => (dev ? [{ ifaces: [`out:${dev}`] }, `what leaves through ${dev}`] : null);
-  if (box.layer === 'l1') return box.hook === 'INGRESS' ? arriving(h.in) : leaving(h.out);
-  if (box.layer === 'l2') return box.hook === 'PREROUTING' || box.hook === 'INPUT' ? arriving(h.in) : leaving(h.out);
-  const dev = { in: h.pin || h.in, out: last.pout || last.out };
-  if (dev.in && box.hook !== 'OUTPUT' && box.hook !== 'POSTROUTING') return arriving(dev.in);
-  return leaving(dev.out);
-}
-
 // ending tells how the path ended.
 function ending(j, p) {
   if (!p.seq.length) return { kind: 'done', head: 'Nothing to show', text: 'None of the layers that are on saw this packet.' };
@@ -139,17 +123,6 @@ function ending(j, p) {
   }
 }
 
-// origin tells where the path starts.
-function origin(j, p) {
-  const box = p.seq[0].box;
-  const h = box.first;
-  if (box.layer === 'l1' && box.hook === 'INGRESS') return peerName(ifaceByName(h.in)) || (h.in === 'lo' ? 'loopback' : 'the network');
-  if (box.layer === 'l2' && box.hook === 'PREROUTING') return peerName(ifaceByName(h.in)) || `port ${h.in}`;
-  if (box.layer === 'l3' && box.hook === 'PREROUTING' && h.stage === 'raw') return h.pin || h.in || 'a device';
-  if (box.hook === 'OUTPUT' || box.hook === 'EGRESS') return j.l3 && j.l3.from ? j.l3.from.name : 'the network stack';
-  return '';
-}
-
 // ---- Diagram ---------------------------------------------------------------
 
 function onLayers() {
@@ -157,108 +130,411 @@ function onLayers() {
   return new Set(LANES.map((l) => l.layer).filter((l) => on.includes(l)));
 }
 
-function draw(j, animate) {
-  const svg = ctx.svg;
-  svg.replaceChildren();
-  const on = onLayers();
-  const lanes = LANES.filter((l) => on.has(l.layer));
-  const p = j ? plan(j, leaf, on) : { boxes: [], seq: [], cols: 0 };
-  const cols = Math.max(p.cols, 3);
-  const W = LEFT + END + (cols - 1) * COL + BOX_W + END + 30;
-  const height = TOP + lanes.length * LANE_H + 6;
-  svg.setAttribute('viewBox', `0 0 ${W} ${height}`);
-  setWidth(svg, W);
-  const laneY = (layer) => TOP + lanes.findIndex((l) => l.layer === layer) * LANE_H + LANE_H / 2;
-  const colX = (c) => LEFT + END + BOX_W / 2 + c * COL;
+// The columns of the diagram. Both lanes use them, so that a hook of the
+// bridge sits right under the IP hook of the same name.
+const X = {
+  loopL: 20, cardL: 124, busL: 230, in: 262, ING: 354, PRE: 504, DEC: 624, FWD: 754, MRG: 884, POST: 1004,
+  EGR: 1154, out: 1246, busR: 1278, cardR: 1384, loopR: 1488, W: 1508,
+};
+const NIC = { w: 148, h: 34, step: 42, max: 8 };
+const PROC = { w: 180, h: 40, gap: 12, max: 5 };
+const BOX = { w: 150, h: 44, small: 110 };
+const LANE_GAP = 120, SOCK_H = 22, BAR_H = 26;
+const HOOK_KEY = { INGRESS: 'ING', EGRESS: 'EGR', PREROUTING: 'PRE', FORWARD: 'FWD', POSTROUTING: 'POST', INPUT: 'INPUT', OUTPUT: 'OUTPUT' };
 
-  lanes.forEach((lane, i) => {
-    const y = TOP + i * LANE_H;
-    svg.append(
-      el('rect', { class: 'lane', x: 4, y: y + 4, width: W - 8, height: LANE_H - 8, rx: 10 }),
-      el('text', { class: 'lane-name', x: 18, y: y + LANE_H / 2 - 2 }, lane.label),
-      el('text', { class: 'label', x: 18, y: y + LANE_H / 2 + 14 }, lane.short),
-    );
-  });
-  const trails = el('g'), marks = el('g');
-  svg.append(trails);
-  T = tracer(svg, trails, marks);
-  T.reset(animate);
-  if (!j || !p.seq.length) {
-    svg.append(el('text', { class: 'label', x: W / 2, y: height / 2 + 4, 'text-anchor': 'middle' }, j ? 'None of the layers that are on saw this packet.' : 'Select a packet to see the hooks it crossed, layer by layer.'));
-    svg.append(marks);
-    return 0;
-  }
+const isPort = (dev) => !!dev.master;
+const shownDevices = () => store.host.ifaces.filter((d) => ctx.blockOn('devices', d.name));
+const shownProcs = () => store.host.procs.filter((p) => ctx.blockOn('procs', procKey(p)));
 
-  for (const box of p.boxes) {
-    const x0 = colX(box.c0) - BOX_W / 2, x1 = colX(box.c1) + BOX_W / 2, y = laneY(box.layer);
-    const g = el('g', { class: `hook ${box.c1 > box.c0 ? 'wide' : ''}` });
-    const rewrote = box.hops.filter((x) => x.h.rewrote).map((x) => x.h.rewrote);
-    const stages = box.layer === 'l3' ? box.hops.filter((x) => !x.h.exit).map((x) => x.h.stage).join(', ') : '';
-    g.append(
-      el('title', {}, [`${box.hook}${stages ? `: ${stages}` : ''}`, boxSub(box), ...rewrote.map((r) => `rewrote the ${r}`)].filter(Boolean).join('\n')),
-      el('rect', { x: x0, y: y - BOX_H / 2, width: x1 - x0, height: BOX_H, rx: 10 }),
-    );
-    // A wide box is entered on its left and left on its right.
-    for (const c of box.c1 > box.c0 ? [box.c0, box.c1] : [box.c0]) {
-      g.append(
-        el('text', { class: 'hookname', x: colX(c), y: y - 3, 'text-anchor': 'middle' }, box.hook),
-        el('text', { class: 'hooksub', x: colX(c), y: y + 12, 'text-anchor': 'middle' }, c === box.c0 ? boxSub(box) : 'back in the hook'),
-      );
-    }
-    const pick = boxPick(box);
-    if (pick) pickable(g, ctx, ...pick);
-    svg.append(g);
-    box.el = g;
-    box.rewrote = rewrote.length > 0;
-  }
-
-  const end = ending(j, p);
-  const first = p.seq[0], last = p.seq[p.seq.length - 1];
-  const startAt = [colX(first.col) - BOX_W / 2 - END + 30, laneY(first.box.layer)];
-  const endAt = [colX(last.col) + BOX_W / 2 + END - 30, laneY(last.box.layer)];
-  const from = origin(j, p);
-  const startNode = el('circle', { class: `node ${from ? '' : 'unknown'}`, cx: startAt[0], cy: startAt[1], r: 8 });
-  svg.append(startNode, el('text', { class: 'label', x: startAt[0], y: startAt[1] - 16, 'text-anchor': 'middle' }, from || 'first seen here'));
-  let endNode = null;
-  if (!end.box) {
-    endNode = el('circle', { class: 'node', cx: endAt[0], cy: endAt[1], r: 8 });
-    svg.append(endNode, el('text', { class: 'label', x: endAt[0], y: endAt[1] - 16, 'text-anchor': 'middle' }, end.lost ? 'not seen again' : end.end || ''));
-  }
-  svg.append(marks);
-
-  // The trail: straight inside a lane, and through the gap between two columns
-  // from lane to lane.
-  const points = [startAt];
-  const reach = [{ node: startNode, dist: 0 }];
-  let dist = 0;
-  const push = (pt) => {
-    const prev = points[points.length - 1];
-    dist += Math.abs(pt[0] - prev[0]) + Math.abs(pt[1] - prev[1]);
-    points.push(pt);
+function socketsFilter(sockets) {
+  return {
+    protos: [...new Set(sockets.map((s) => s.proto))].sort(),
+    ports: [...new Set(sockets.map((s) => s.port))].sort((a, b) => a - b),
   };
-  p.seq.forEach((s, i) => {
-    const at = [colX(s.col), laneY(s.box.layer)];
-    const prev = points[points.length - 1];
-    if (prev[1] !== at[1]) {
-      const mid = at[0] - COL / 2;
-      push([mid, prev[1]]);
-      push([mid, at[1]]);
+}
+
+function note(svg, text) {
+  svg.setAttribute('viewBox', '0 0 900 120');
+  setWidth(svg, 900);
+  svg.append(el('text', { x: 450, y: 64, 'text-anchor': 'middle', class: 'label' }, text));
+}
+
+// build draws the diagram for the layers that are on and the devices of the
+// namespace. It does not depend on the packet.
+function build() {
+  const svg = ctx.svg;
+  S = null;
+  T = null;
+  const on = onLayers();
+  const devices = shownDevices();
+  const ports = devices.filter(isPort), others = devices.filter((d) => !isPort(d));
+  // The IP lane also carries the device hooks of the devices that are no ports.
+  const has3 = on.has('l3') || on.has('l1');
+  // The bridge lane is drawn while a bridge or a port of one is on view.
+  const has2 = (on.has('l2') || on.has('l1')) && devices.some((d) => isPort(d) || d.kind === 'bridge');
+  if (!has3 && !has2) {
+    note(svg, `No bridge in ${stackName()}, so there are no bridge hooks to show. Switch another layer on.`);
+    return;
+  }
+  const cards3 = has3 ? others.slice(0, NIC.max) : [], cards2 = has2 ? ports.slice(0, NIC.max) : [];
+  const more3 = has3 ? others.length - cards3.length : 0, more2 = has2 ? ports.length - cards2.length : 0;
+  const procs = on.has('l3') ? shownProcs().slice(0, PROC.max) : [];
+  const moreProcs = on.has('l3') ? shownProcs().length - procs.length : 0;
+
+  // The rows, from the top: the processes, the sockets, the IP lane (its cards
+  // stack upwards), the bridge lane (its cards stack downwards), and the bar
+  // of the bridge device.
+  const sockY = 8 + PROC.h + 18;
+  const cardsUp = (Math.max(cards3.length, 1) - 1) * NIC.step + NIC.h / 2 + 26 + (more3 ? 18 : 0);
+  let y3 = 0, y2 = 0, barY = 0, height = 0;
+  if (has3) {
+    y3 = Math.max(on.has('l3') ? sockY + SOCK_H + 150 : 44, cardsUp + 4);
+    height = y3 + 34;
+  }
+  if (has2) {
+    y2 = has3 ? y3 + LANE_GAP : 44;
+    const cardsDown = (Math.max(cards2.length, 1) - 1) * NIC.step + NIC.h / 2 + (more2 ? 20 : 0);
+    barY = y2 + Math.max(150, cardsDown + 26);
+    height = barY + BAR_H + 22;
+  }
+  svg.setAttribute('viewBox', `0 0 ${X.W} ${height}`);
+  setWidth(svg, X.W, 1240);
+  // The diagram keeps its size, and the page scrolls when it is taller than the window.
+  svg.classList.add('tall');
+
+  S = { on, y3, y2, barY, sockY, nodes: new Map(), edges: new Map(), cards: { 2: { in: {}, out: {} }, 3: { in: {}, out: {} } }, procs: {}, subs: [], has2, has3 };
+  const tracks = el('g'), trails = el('g'), parts = el('g'), marks = el('g');
+  svg.append(tracks, trails, parts, marks);
+  const track = (pts, cls = '') => tracks.append(el('path', { class: `track ${cls}`, d: linePath(pts) }));
+  const arrow = (x, y, rot) => tracks.append(el('path', { class: 'arrow', d: 'M-6 -5 L5 0 L-6 5 Z', transform: `translate(${x} ${y}) rotate(${rot})` }));
+  const label = (x, y, text, anchor = 'middle') => parts.append(el('text', { class: 'label', x, y, 'text-anchor': anchor }, text));
+
+  // The map: the named points of the diagram and the lines between them. A
+  // point is a box of a hook, a node on a line, or a place on a bar.
+  const point = (key, x, y, node, box) => { S.nodes.set(key, { at: [x, y], el: node || null, box: !!box }); S.edges.set(key, []); };
+  const line = (a, b, cls) => {
+    S.edges.get(a).push(b);
+    track([S.nodes.get(a).at, S.nodes.get(b).at], cls);
+  };
+  const hook = (key, x, y, name, layer, small) => {
+    if (!on.has(layer)) { point(key, x, y); return; }
+    const g = drawHook(parts, x, y, name, small ? 'device hook' : '', small ? BOX.small : BOX.w, BOX.h);
+    if (small) S.subs.push(g.querySelector('.hooksub'));
+    point(key, x, y, g, true);
+  };
+  const circle = (x, y) => { const c = el('circle', { class: 'node', cx: x, cy: y, r: 8 }); parts.append(c); return c; };
+  const diamond = (x, y) => { const d = el('path', { class: 'diamond', d: `M${x} ${y - 11} L${x + 11} ${y} L${x} ${y + 11} L${x - 11} ${y} Z` }); parts.append(d); return d; };
+  const dot = (x, y) => { const c = el('circle', { class: 'diamond', cx: x, cy: y, r: 5 }); parts.append(c); return c; };
+
+  // lane draws the line of one lane: the hooks of its layer between the device
+  // hooks of its ends.
+  const lane = (k, y, layer) => {
+    const keys = ['in', 'ING', 'PRE', 'DEC', 'FWD', 'MRG', 'POST', 'EGR', 'out'].map((n) => n + k);
+    point(keys[0], X.in, y, circle(X.in, y));
+    hook(keys[1], X.ING, y, 'ingress', 'l1', true);
+    hook(keys[2], X.PRE, y, 'PREROUTING', layer);
+    point(keys[3], X.DEC, y, on.has(layer) ? diamond(X.DEC, y) : null);
+    hook(keys[4], X.FWD, y, 'FORWARD', layer);
+    point(keys[5], X.MRG, y, on.has(layer) ? dot(X.MRG, y) : null);
+    hook(keys[6], X.POST, y, 'POSTROUTING', layer);
+    hook(keys[7], X.EGR, y, 'egress', 'l1', true);
+    point(keys[8], X.out, y, circle(X.out, y));
+    for (let i = 1; i < keys.length; i++) line(keys[i - 1], keys[i]);
+    arrow((X.in + X.ING - BOX.small / 2) / 2 + 2, y, 0);
+    arrow((X.EGR + BOX.small / 2 + X.out) / 2, y, 0);
+  };
+
+  // cards draws the devices at both ends of a lane. dir is -1 for the cards
+  // that stack upwards and 1 for the ones that stack downwards.
+  const cards = (k, y, devs, more, dir, headings) => {
+    for (const [side, cx, bus, nodeX] of [['in', X.cardL, X.busL, X.in], ['out', X.cardR, X.busR, X.out]]) {
+      const rows = devs.length;
+      devs.forEach((dev, i) => {
+        // The first device of the list is the topmost card.
+        const cy = dir < 0 ? y - (rows - 1 - i) * NIC.step : y + i * NIC.step;
+        const edge = side === 'in' ? cx + NIC.w / 2 : cx - NIC.w / 2;
+        const wire = [[edge, cy], [bus, cy], [bus, y]];
+        track([...wire, [nodeX, y]]);
+        const g = el('g', { class: `nic ${dev.up ? '' : 'down'}` });
+        const second = isPort(dev) ? peerName(dev) || `port of ${dev.master}` : dev.addrs[0] || (dev.up ? 'no address' : 'down');
+        g.append(
+          el('title', {}, `${dev.name}${isPort(dev) ? `, port of ${dev.master}` : ''}${peerName(dev) ? `: ${peerName(dev)}` : ''}`),
+          el('rect', { x: cx - NIC.w / 2, y: cy - NIC.h / 2, width: NIC.w, height: NIC.h, rx: 6 }),
+          el('text', { class: 'nic-name', x: cx - NIC.w / 2 + 10, y: cy - 2 }, short(dev.name, 19)),
+          el('text', { class: 'nic-addr', x: cx - NIC.w / 2 + 10, y: cy + 11 }, short(second, 21)),
+        );
+        pickable(g, ctx, { ifaces: [`${side}:${dev.name}`] }, side === 'in' ? `what arrives on ${dev.name}` : `what leaves through ${dev.name}`);
+        parts.append(g);
+        S.cards[k][side][dev.name] = { el: g, wire, cx, cy, bridge: dev.kind === 'bridge' };
+      });
+      const end = dir < 0 ? y - (Math.max(rows, 1) - 1) * NIC.step - NIC.h / 2 : y + (Math.max(rows, 1) - 1) * NIC.step + NIC.h / 2;
+      if (dir < 0) {
+        label(cx, end - 8 - (more ? 18 : 0), headings[side]);
+        if (more) label(cx, end - 8, `and ${more} more`);
+      } else {
+        label(cx, y - NIC.h / 2 - 8, headings[side]);
+        if (more) label(cx, end + 16, `and ${more} more`);
+      }
     }
-    push(at);
-    const stopHere = end.box === s.box && i === p.seq.length - 1;
-    reach.push({ node: s.box.el, dist, cls: `lit${s.box.rewrote ? ' rewrote' : ''}${stopHere ? ' stopped' : ''}`, stop: stopHere ? [at[0] + BOX_W / 2 - 4, at[1] - BOX_H / 2 + 4] : null });
+  };
+
+  if (has3) {
+    lane(3, y3, 'l3');
+    if (on.has('l3')) {
+      // The sockets and the processes behind them, above the IP lane.
+      const mid = (sockY + SOCK_H + y3) / 2;
+      const bar = el('rect', { class: 'proc', x: X.in, y: sockY, width: X.out - X.in, height: SOCK_H, rx: 6 });
+      parts.append(bar, el('text', { class: 'proc-label', x: (X.in + X.out) / 2, y: sockY + 15, 'text-anchor': 'middle' }, 'Sockets'));
+      point('SOCKin', X.DEC, sockY + SOCK_H, bar);
+      point('SOCKout', X.MRG, sockY + SOCK_H, bar);
+      hook('INPUT3', X.DEC, mid, 'INPUT', 'l3');
+      hook('OUTPUT3', X.MRG, mid, 'OUTPUT', 'l3');
+      line('DEC3', 'INPUT3'); line('INPUT3', 'SOCKin'); line('SOCKout', 'OUTPUT3'); line('OUTPUT3', 'MRG3');
+      arrow(X.DEC, (mid + BOX.h / 2 + y3) / 2 - 4, -90);
+      arrow(X.MRG, (mid + BOX.h / 2 + y3) / 2 + 6, 90);
+      label(X.DEC + 14, y3 - 30, 'routing', 'start');
+      const rowW = procs.length * (PROC.w + PROC.gap) - PROC.gap;
+      procs.forEach((proc, i) => {
+        const x = (X.in + X.out - rowW) / 2 + i * (PROC.w + PROC.gap), y = 8;
+        tracks.append(el('path', { class: 'track thin', d: `M${x + PROC.w / 2} ${y + PROC.h} V${sockY}` }));
+        const g = el('g', { class: 'nic' });
+        const portsText = proc.sockets.map((s) => `${s.proto} :${s.port}`).join('  ');
+        g.append(
+          el('title', {}, `${proc.name} (pid ${proc.pid}): ${portsText}`),
+          el('rect', { x, y, width: PROC.w, height: PROC.h, rx: 8 }),
+          el('text', { class: 'nic-name', x: x + 10, y: y + 16 }, short(proc.name, 22)),
+          el('text', { class: 'nic-addr', x: x + 10, y: y + 30 }, short(portsText, 26)),
+        );
+        pickable(g, ctx, socketsFilter(proc.sockets), `the ports of ${proc.name} (pid ${proc.pid})`);
+        parts.append(g);
+        S.procs[proc.pid] = { el: g, cx: x + PROC.w / 2, bottom: y + PROC.h };
+      });
+      if (moreProcs) label((X.in + X.out + rowW) / 2 + 14, 8 + PROC.h / 2 + 4, `and ${moreProcs} more`, 'start');
+      if (!procs.length) label((X.in + X.out) / 2, sockY - 10, store.host.procs.length ? 'The processes are switched off (Show, Processes).' : 'No process listens on a TCP or UDP port.');
+    }
+    cards(3, y3, cards3, more3, -1, { in: 'Devices: arriving on', out: 'Devices: leaving through' });
+    if (on.has('l3')) label(X.DEC, y3 + 40, 'IP hooks');
+  }
+
+  if (has2) {
+    lane(2, y2, 'l2');
+    const mid = (y2 + barY) / 2 + 4;
+    const bar = el('rect', { class: 'proc', x: X.in, y: barY, width: X.out - X.in, height: BAR_H, rx: 6 });
+    parts.append(bar, el('text', { class: 'proc-label', x: (X.in + X.out) / 2, y: barY + 17, 'text-anchor': 'middle' }, 'Bridge device: the bridge as a device of the IP stack'));
+    point('BARin', X.DEC, barY, bar);
+    point('BARout', X.MRG, barY, bar);
+    hook('INPUT2', X.DEC, mid, 'INPUT', 'l2');
+    hook('OUTPUT2', X.MRG, mid, 'OUTPUT', 'l2');
+    line('DEC2', 'INPUT2'); line('INPUT2', 'BARin'); line('BARout', 'OUTPUT2'); line('OUTPUT2', 'MRG2');
+    if (on.has('l2')) {
+      arrow(X.DEC, (y2 + mid - BOX.h / 2) / 2 + 4, 90);
+      arrow(X.MRG, (y2 + mid - BOX.h / 2) / 2 - 4, -90);
+      label(X.DEC, y2 - (has3 ? 30 : 34), 'Bridge hooks');
+    }
+    cards(2, y2, cards2, more2, 1, { in: 'Ports: arriving on', out: 'Ports: leaving through' });
+  }
+
+  if (has2 && has3) {
+    // br_netfilter: a bridge hook calls the IP hook above it, and the packet
+    // comes back.
+    for (const n of ['PRE', 'FWD', 'POST']) {
+      S.edges.get(`${n}2`).push(`${n}3`);
+      S.edges.get(`${n}3`).push(`${n}2`);
+      if (on.has('l2') && on.has('l3')) track([[X[n], y2 - BOX.h / 2], [X[n], y3 + BOX.h / 2]], 'loop');
+    }
+    if (on.has('l2') && on.has('l3')) label(X.FWD + 10, (y2 + y3) / 2 + 4, 'br_netfilter', 'start');
+    // The bridge devices are among the devices of the IP lane. The bar of the
+    // bridge lane is joined to their cards around both sides.
+    const loopY = barY + BAR_H / 2;
+    for (const [side, loopX, edgeDx, barX] of [['in', X.loopL, -NIC.w / 2, X.in], ['out', X.loopR, NIC.w / 2, X.out]]) {
+      const bridges = Object.values(S.cards[3][side]).filter((c) => c.bridge);
+      if (!bridges.length) continue;
+      const top = Math.min(...bridges.map((c) => c.cy));
+      track([[barX, loopY], [loopX, loopY], [loopX, top]]);
+      for (const c of bridges) track([[loopX, c.cy], [c.cx + edgeDx, c.cy]]);
+      arrow(loopX, (loopY + y3) / 2, side === 'in' ? -90 : 90);
+    }
+  }
+  T = tracer(svg, trails, marks);
+}
+
+// way finds the way from one point of the map to another, along the lines.
+function way(from, to) {
+  if (from === to) return [from];
+  const prev = new Map([[from, null]]);
+  const queue = [from];
+  while (queue.length) {
+    const at = queue.shift();
+    for (const next of S.edges.get(at) || []) {
+      if (prev.has(next)) continue;
+      prev.set(next, at);
+      if (next === to) {
+        const path = [to];
+        while (prev.get(path[0]) !== null) path.unshift(prev.get(path[0]));
+        return path;
+      }
+      queue.push(next);
+    }
+  }
+  return null;
+}
+
+// laneOf tells the lane of a box of the plan: a device hook is in the lane of
+// the bridge when its device is a port.
+function laneOf(box) {
+  if (box.layer === 'l3') return 3;
+  if (box.layer === 'l2') return 2;
+  const dev = ifaceByName(box.first.in || box.first.out);
+  return dev && isPort(dev) && S.has2 ? 2 : 3;
+}
+
+// trace puts the path of a packet on the diagram. It returns how long the
+// animation takes.
+function trace(j, p) {
+  const end = ending(j, p);
+  // The stops of the trail. A stop may light up a part, and a stop with a
+  // gap starts a new trail: the packet left the namespace's hooks on one side
+  // and came back in on the other.
+  const stops = [];
+  let cur = null, gap = false;
+  const push = (at, node, cls) => { stops.push({ at, node, cls: cls || 'lit', gap }); gap = false; };
+  const walk = (to) => {
+    const path = cur === null ? [to] : way(cur, to);
+    if (!path) return false;
+    for (const key of cur === null ? path : path.slice(1)) {
+      const n = S.nodes.get(key);
+      // A box on the way lights up only when one of its probes saw the packet.
+      push(n.at, n.box ? null : n.el);
+    }
+    cur = to;
+    return true;
+  };
+  const enter = (k, dev) => {
+    if (stops.length) gap = true;
+    const card = S.cards[k].in[dev];
+    if (card) card.wire.forEach((pt, i) => push(pt, i === 0 ? card.el : null));
+    cur = null;
+    walk(`in${k}`);
+  };
+  const leave = (k, dev) => {
+    if (!walk(`out${k}`)) return;
+    const card = S.cards[k].out[dev];
+    if (card) [...card.wire].reverse().forEach((pt, i, all) => push(pt, i === all.length - 1 ? card.el : null));
+    cur = null;
+  };
+  const loopY = S.barY + BAR_H / 2;
+  // up takes a frame from the bridge lane to the IP lane, through the bridge device.
+  const up = (dev) => {
+    const card = S.cards[3].in[dev];
+    if (!walk('BARin') || !card) { enter(3, dev); return; }
+    push([X.DEC, loopY]); push([X.loopL, loopY]); push([X.loopL, card.cy]); push([card.cx - NIC.w / 2, card.cy], card.el);
+    card.wire.forEach((pt) => push(pt));
+    cur = null;
+    walk('in3');
+  };
+  // down takes a packet from the IP lane to the bridge lane the same way.
+  const down = (dev) => {
+    const card = S.cards[3].out[dev];
+    if (!card || !walk('out3')) { gap = true; cur = null; walk('BARout'); return; }
+    [...card.wire].reverse().forEach((pt) => push(pt));
+    push([card.cx + NIC.w / 2, card.cy], card.el); push([X.loopR, card.cy]); push([X.loopR, loopY]); push([X.MRG, loopY]);
+    cur = null;
+    walk('BARout');
+  };
+
+  let prev = null;
+  let last = null;
+  p.seq.forEach((s, i) => {
+    const box = s.box, k = laneOf(box), key = HOOK_KEY[box.hook] + k;
+    const n = S.nodes.get(key);
+    if (!n) return;
+    const h = box.first;
+    const lastHop = box.hops[box.hops.length - 1].h;
+    if (cur === null && !stops.length) {
+      // Where the path starts: at a device, at a process, or right at the hook
+      // when the packet started to match the filter in the middle of its way.
+      if (box.hook === 'INGRESS' || box.hook === 'PREROUTING') enter(k, h.in);
+      else if (key === 'OUTPUT3') {
+        const proc = j.l3 && j.l3.from && S.procs[j.l3.from.pid];
+        const mid = S.sockY + SOCK_H / 2;
+        if (proc) { push([proc.cx, proc.bottom], proc.el); push([proc.cx, mid]); push([X.MRG, mid]); }
+        walk('SOCKout');
+      } else if (key === 'OUTPUT2') walk('BARout');
+    } else if (cur === null || !way(cur, key)) {
+      // No line leads there. Between the lanes, the way is around the side,
+      // through the bridge device. Within a lane, the packet left through a
+      // device and came back in through another one (loopback, a veth pair).
+      const from = prev ? laneOf(prev.box) : k;
+      const out = prev ? prev.box.hops[prev.box.hops.length - 1].h : null;
+      const viaBridge = k === 3 && S.has2 && S.cards[3].in[h.in] && S.cards[3].in[h.in].bridge;
+      const atEnd = prev && ['EGRESS', 'POSTROUTING'].includes(prev.box.hook) && prev.box.exited;
+      if (cur !== null && (from === 2 || viaBridge) && k === 3 && way(cur, 'BARin')) up(h.in || (out && out.bridge) || '');
+      else if (cur !== null && from === 3 && k === 2) down((out && out.out) || h.bridge || '');
+      else {
+        if (cur !== null && atEnd) leave(from, out ? out.out || '' : '');
+        enter(k, h.in || '');
+      }
+    }
+    if (!walk(key)) { gap = true; cur = null; walk(key); }
+    const stop = stops[stops.length - 1];
+    stop.node = n.el;
+    const stopped = end.box === box && i === p.seq.length - 1;
+    stop.cls = `lit${box.hops.some((x) => x.h.rewrote) ? ' rewrote' : ''}${stopped ? ' stopped' : ''}`;
+    if (stopped) stop.mark = [n.at[0] + (box.layer === 'l1' ? BOX.small : BOX.w) / 2 - 4, n.at[1] - BOX.h / 2 + 4];
+    // The device hook tells which device it is of this time.
+    const sub = n.el && n.el.querySelector('.hooksub');
+    if (sub && box.layer === 'l1') stop.sub = [sub, h.in || h.out];
+    prev = s;
+    last = { box, key, k, hop: lastHop };
   });
-  if (endNode) {
-    push(endAt);
-    reach.push({ node: endNode, dist, cls: end.lost ? 'stopped' : 'lit', stop: end.lost ? [endAt[0] + 16, endAt[1] - 16] : null });
+  if (!last) return 0;
+
+  // Where the path ends.
+  if (last.box.exited) {
+    const name = HOOK_KEY[last.box.hook];
+    // br_netfilter runs the IP POSTROUTING after the bridge's own: the last
+    // probe is in the IP lane, but the frame leaves through the port.
+    if (last.key === 'POST3' && last.hop.pout && S.has2 && walk('POST2')) leave(2, last.hop.pout);
+    else if (name === 'EGR' || name === 'POST') leave(last.k, last.hop.out || '');
+    else if (last.key === 'INPUT3') {
+      walk('SOCKin');
+      const proc = j.l3 && j.l3.to && S.procs[j.l3.to.pid];
+      const mid = S.sockY + SOCK_H / 2;
+      if (proc) { push([X.DEC, mid]); push([proc.cx, mid]); push([proc.cx, proc.bottom], proc.el); }
+    } else if (last.key === 'INPUT2') walk('BARin');
+    else if (end.lost) {
+      // The packet left the hook and was not seen again: the trail ends at the
+      // next point of the line.
+      const next = { PRE: 'DEC', FWD: 'MRG', OUTPUT: 'MRG' }[name];
+      if (next && walk(next + last.k)) {
+        const stop = stops[stops.length - 1];
+        stop.cls = 'stopped';
+        stop.mark = [stop.at[0] + 16, stop.at[1] - 16];
+        if (!stop.node) stop.mark = [stop.at[0], stop.at[1]];
+      }
+    }
   }
-  const t = T.trail(points, '', 0);
-  for (const r of reach) {
-    const at = T.timeAt(0, r.dist);
-    T.light(r.node, at, r.cls || 'lit');
-    if (r.stop) T.stop(r.stop, at);
+
+  // Draw the trails one after another, and light up the parts as they are reached.
+  let at = 0;
+  let from = 0;
+  while (from < stops.length) {
+    let to = from + 1;
+    while (to < stops.length && !stops[to].gap) to++;
+    const part = stops.slice(from, to);
+    const t = T.trail(part.map((x) => x.at), '', at);
+    let dist = 0;
+    part.forEach((x, i) => {
+      if (i) dist += Math.hypot(x.at[0] - part[i - 1].at[0], x.at[1] - part[i - 1].at[1]);
+      const when = T.timeAt(at, dist);
+      if (x.node) T.light(x.node, when, x.cls);
+      if (x.mark) T.stop(x.mark, when);
+      if (x.sub) T.later(when, () => { x.sub[0].textContent = short(x.sub[1], 16); });
+    });
+    at = t.done;
+    from = to;
   }
-  return t.done;
+  return at;
 }
 
 function show(item, animate) {
@@ -267,7 +543,12 @@ function show(item, animate) {
     shown = j;
     leaf = j ? defaultLeaf(j) : 0;
   }
-  return draw(j, animate);
+  if (!S || !T) return 0;
+  T.reset(animate);
+  for (const sub of S.subs) sub.textContent = 'device hook';
+  if (!j) return 0;
+  const p = plan(j, leaf, S.on);
+  return p.seq.length ? trace(j, p) : 0;
 }
 
 // ---- Text ------------------------------------------------------------------
@@ -302,7 +583,7 @@ function cells(item) {
   return [
     [clock(j.time), 'mono'], [layersOf(j), 'mono'],
     [j.proto ? j.src : f ? f.src : '', 'mono'], [j.proto ? j.dst : f ? f.dst : '', 'mono'],
-    [j.proto ? `${j.proto.toUpperCase()} ${j.info}` : f ? [f.type, f.info].filter(Boolean).join(' ') : '', 'details'],
+    [j.proto ? [j.proto.toUpperCase(), j.info].filter(Boolean).join(' ') : f ? [f.type, f.info].filter(Boolean).join(' ') : '', 'details'],
     [end.head + (copies > 1 ? ` (1 of ${copies} copies)` : ''), end.kind === 'stopped' ? 'outcome-stopped' : 'outcome-done'],
   ];
 }
@@ -342,21 +623,26 @@ export default {
   title: 'Packets',
   noun: 'packet',
   layer: '',
-  about: 'One packet across the device, bridge, and IP hooks, in the order it crossed them.',
+  about: 'One packet across the device, bridge, and IP hooks, on one diagram.',
   subs: [],
   // The layers of this view can be switched on and off one by one.
   layered: true,
   panels: [{ id: 'packets', label: 'Packets' }, { id: 'details', label: 'Hooks' }],
-  aria: 'The hooks of all the layers and the path of the selected packet',
+  aria: 'The hooks of all the layers, the devices around them, and the path of the selected packet',
   init(context) { ctx = context; },
   items: (j) => [{ id: `${j.id}`, j, time: j.time }],
   columns: ['Time', 'Layers', 'Source', 'Destination', 'Details', 'Outcome'],
   cells,
   resize: () => false,
-  build: () => { draw(shown, false); },
+  build,
   show,
   verdict,
   detail,
+  // blocks are the cards of the diagram: each can be taken out of it.
+  blocks: () => [
+    { id: 'devices', label: 'Devices', items: store.host.ifaces.map((d) => ({ key: d.name, label: d.name, note: isPort(d) ? `port of ${d.master}` : d.kind === 'bridge' ? 'bridge' : d.addrs[0] || '' })) },
+    { id: 'procs', label: 'Processes', items: store.host.procs.map((x) => ({ key: procKey(x), label: x.name, note: x.sockets.map((k) => `:${k.port}`).join(' ') })) },
+  ],
   // tabs are the copies of the selected frame, when a bridge made several.
   tabs() {
     if (!shown) return [];
