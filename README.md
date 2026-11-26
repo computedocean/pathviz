@@ -1,6 +1,6 @@
 # PathViz
 
-PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the [Netfilter](https://www.netfilter.org/) hooks of the kernel: the points on a packet's way where iptables and nftables rules run. PathViz covers the hooks of all three layers: the ingress and egress hooks of the network devices, the hooks of the Linux bridges, and the hooks of the IP layer (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), with the raw, mangle, nat, and filter stages inside them.
+PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the [Netfilter](https://www.netfilter.org/) hooks of the kernel: the points on a packet's way where ebtables, iptables, and nftables rules run. PathViz covers the hooks of all three layers: the ingress and egress hooks of the network devices (L1), the hooks of the Linux bridges (L2), and the hooks of the IP layer (the classic PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING).
 
 It helps with questions like these, among others:
 
@@ -14,33 +14,31 @@ No special setup is needed for a telling picture. Start PathViz on a plain Linux
 
 PathViz only observes: it logs the packets and never changes or stops them. It is built for learning and demos with a few packets per second. The focus is on accurate, readable visualizations rather than handling large traffic volumes.
 
-https://github.com/user-attachments/assets/da465c3e-42d9-4892-99f3-dd930da6c813
-
 ## Gallery
 
 ### A Linux host
 
-Requests to a web server on the host cross PREROUTING and INPUT and reach the process behind the socket. Requests to a port that a firewall rule blocks stop in the filter stage of INPUT. The replies of the server go through OUTPUT and POSTROUTING.
+A web server on a plain Linux host: requests are delivered to its process through PREROUTING and INPUT, the replies leave through OUTPUT and POSTROUTING, and a firewall rule stops the requests to a blocked port.
 
-<!-- Video: pathviz-host.mp4 -->
+https://github.com/user-attachments/assets/4cbf4cd6-f86d-4f5a-adbb-9dfcc11ee280
 
 ### A router
 
-Packets for another network cross PREROUTING, FORWARD, and POSTROUTING, from the device they arrive on to the one they leave through. For some of them, a DNAT rule rewrites the destination in the nat stage of PREROUTING, and the stage turns amber.
+A host that forwards packets between two networks. A DNAT rule rewrites the destination of some of them on the way, and the stage where it happens turns amber.
 
-<!-- Video: pathviz-router.mp4 -->
+https://github.com/user-attachments/assets/53ba8864-d9de-4a75-bcb1-6f598f220ab6
 
 ### A Docker host
 
-The device, bridge, and IP hooks on one diagram, for two containers on Docker's default bridge. A request to a published port arrives on `eth0`, gets its destination rewritten in PREROUTING, is forwarded to `docker0`, and goes around through the bridge device into the bridge hooks and out to the container. Traffic between the two containers stays in the bridge, and with `br_netfilter` loaded, every bridge hook also calls the IP hook of the same name.
+A request to a published port on its way to a container: NAT and routing in the IP layer first, then Docker's bridge. Traffic between two containers stays in the bridge, and `br_netfilter` shows it to the IP firewall anyway.
 
-<!-- Video: pathviz-docker.mp4 -->
+https://github.com/user-attachments/assets/c35429b0-6658-4b9f-a88e-7210c750e257
 
 ### A Linux bridge
 
-A bridge with four ports, each leading to a network namespace. A broadcast frame floods to all ports. A frame to an address that the bridge has learned goes to one port only. A frame for the bridge itself goes up to the host, and a firewall rule of the bridge family drops a frame on its way.
+A bridge with four ports: a broadcast floods to all of them, a frame for a known address goes to one port only, and a firewall rule of the bridge family drops a frame on its way.
 
-<!-- Video: pathviz-bridge.mp4 (or pathviz-bridge-fit.mp4, recorded in a narrower page) -->
+https://github.com/user-attachments/assets/b9aee1ae-53e1-4def-844a-6042e429b612
 
 The host and the router are the [routing demo](demos/routing). The [containers demo](demos/containers) and the [bridges demo](demos/bridges) have richer setups of the other two.
 
