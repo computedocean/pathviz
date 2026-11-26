@@ -59,9 +59,11 @@ function wideLayout(avail, hooksOnly, nicCount, nicMore) {
   // An arrowhead needs a line that is long enough to carry it.
   // Without the stage chips, the INPUT and OUTPUT boxes need much less height.
   const boxY = hooksOnly ? 160 : 205;
-  const route2Y = hooksOnly ? 214 : 318;
   const nicBottom = 70 + (Math.max(nicCount, 1) - 1) * 42 + 17 + (nicMore ? 22 : 0);
   const sockY = Math.max(hooksOnly ? 246 : 345, nicBottom + 16);
+  // The second routing decision sits in the middle of the line from the
+  // sockets up to OUTPUT, however far down the cards push the sockets.
+  const route2Y = Math.round(((hooksOnly ? 182 : 294) + sockY) / 2);
   const arrows = [[route1, 112, 90], [route1, hooksOnly ? mid(182, sockY) : 306, 90], [merge, 106, -90], [mid(busL, busR), 8, 180]];
   for (const [from, to] of [[inX, preL], [route1, fwdL], [fwdL + 162, merge], [postL + 162, out]]) {
     if (to - from >= 44) arrows.push([mid(from, to), 70, 0]);

@@ -47,8 +47,9 @@ const state = {
   hidden: saved.hidden || {},
   // folded are the tables that are folded down to their header.
   folded: saved.folded || {},
-  // off are the blocks that are taken out of the diagrams (devices, processes),
-  // per namespace.
+  // off are the blocks that are taken out of a diagram (devices, processes):
+  // namespace -> view -> kind -> keys. Every view has its own, so that what is
+  // hidden in one diagram does not empty another.
   off: saved.off || {},
   journeys: [],     // the traced packets, newest last
   items: [],        // what the view lists of them
@@ -63,6 +64,8 @@ const state = {
   filter: emptyFilter(),
 };
 
+// An earlier version kept one list of blocks for all the views: that is dropped.
+for (const ns of Object.values(state.off)) { delete ns.devices; delete ns.procs; }
 if (params.get('detail') === 'hooks') state.subs.l3 = 'hooks';
 if (params.get('sub') && state.view.subs.some((s) => s.id === params.get('sub'))) state.subs[state.view.id] = params.get('sub');
 if (listParam('layers')) state.layers = ALL_LAYERS.filter((l) => listParam('layers').includes(l));
@@ -90,8 +93,18 @@ const hasSwitch = embed && urlPanels === null;
 document.body.classList.toggle('embed', embed);
 document.body.classList.toggle('below', panelsBelow);
 
-// offKeys are the blocks of one kind that are switched off in the watched namespace.
-const offKeys = (kind) => (state.off[store.netns] || {})[kind] || [];
+// offKeys are the blocks of one kind that are switched off in the diagram on
+// view, in the watched namespace.
+const offKeys = (kind) => ((state.off[store.netns] || {})[state.view.id] || {})[kind] || [];
+
+// setOff replaces the switched-off blocks of the diagram on view: kind -> keys.
+function setOff(kinds) {
+  const ns = state.off[store.netns] || (state.off[store.netns] = {});
+  const kept = Object.fromEntries(Object.entries(kinds).filter(([, keys]) => keys.length));
+  if (Object.keys(kept).length) ns[state.view.id] = kept;
+  else delete ns[state.view.id];
+  if (!Object.keys(ns).length) delete state.off[store.netns];
+}
 
 const svg = $('#diagram');
 const view = () => state.view;
@@ -182,6 +195,7 @@ function chrome() {
   document.body.classList.toggle('no-panels', !any);
   showFolded();
   showBlocks();
+  showPreset();
 
   $('#list-title').textContent = v.title;
   $('#embed-tables').textContent = v.title;
@@ -266,10 +280,7 @@ function showBlocks() {
     if (menu.dataset.key === key) continue;
     menu.dataset.key = key;
     const set = (keys) => {
-      const ns = state.off[store.netns] || (state.off[store.netns] = {});
-      ns[b.id] = keys;
-      if (!keys.length) delete ns[b.id];
-      if (!Object.keys(ns).length) delete state.off[store.netns];
+      setOff({ ...(state.off[store.netns] || {})[state.view.id], [b.id]: keys });
       dropPreset();
       save();
       showBlocks();
@@ -391,6 +402,7 @@ function describe() {
   const box = $('#verdict');
   const d = v.verdict(item);
   box.className = `verdict ${d.kind || ''}`;
+  box.title = [d.head, d.text].filter(Boolean).join(' ');
   // The sentence is one element, so that the box can center it as a whole.
   const p = html('span', {});
   if (d.head) p.append(html('strong', {}, d.head), ' ');
@@ -411,6 +423,9 @@ function tabs() {
     rebuild(false);
   })));
 }
+
+// A click unfolds an outcome that was cut to fit its lines, and folds it back.
+$('#verdict').addEventListener('click', () => $('#verdict').classList.toggle('open'));
 
 // ---- Diagram, selection, and playback ----------------------------------------
 
@@ -527,7 +542,11 @@ function showFilter(f) {
   // The line is cut short when it does not fit: the tooltip has all of it.
   $('#tracing').textContent = describeFilter(state.filter);
   $('#tracing').title = describeFilter(state.filter);
-  if (preset && !sameFilter({ ...emptyFilter(), ...preset.filter }, store.capture)) dropPreset();
+  // The filter is shared by all the views: a changed one drops their presets.
+  for (const [id, x] of Object.entries(presets)) {
+    if (x && !sameFilter({ ...emptyFilter(), ...x.filter }, store.capture)) presets[id] = null;
+  }
+  showPreset();
   markDirty();
 }
 
@@ -761,43 +780,45 @@ showTheme();
 // ---- Presets -------------------------------------------------------------------
 
 // A preset sets the filter, the layers of the combined view, and the devices
-// and processes of the diagrams (see presets.js). The list shows the preset
-// while nothing of it was changed by hand.
+// and processes of the diagram on view (see presets.js). Every view offers the
+// presets that fit it and remembers its own. The list shows the preset while
+// nothing of it was changed by hand.
 const presetSelect = $('#preset-select');
-presetSelect.append(new Option('Custom', ''), ...PRESETS.map((x) => { const o = new Option(x.label, x.id); o.title = x.about; return o; }));
-let preset = null;
+const presets = {}; // view -> the preset that is on
+const fitting = () => PRESETS.filter((x) => x.views.includes(state.view.id));
 
 function showPreset() {
-  presetSelect.value = preset ? preset.id : '';
-  presetSelect.title = preset ? preset.about : 'A filter and a look for a common setup';
+  const options = [{ id: '', label: 'Custom' }, ...fitting().map((x) => ({ id: x.id, label: x.label }))];
+  const on = presets[state.view.id] || null;
+  fillSelect(presetSelect, options, on ? on.id : '');
+  presetSelect.title = on ? on.about : 'A filter and a look for a common setup';
 }
 
 // dropPreset tells the list that a thing the preset had set was changed.
 function dropPreset() {
-  preset = null;
+  presets[state.view.id] = null;
   showPreset();
 }
 
 presetSelect.addEventListener('change', () => {
-  preset = PRESETS.find((x) => x.id === presetSelect.value) || null;
+  const preset = fitting().find((x) => x.id === presetSelect.value) || null;
+  presets[state.view.id] = preset;
   showPreset();
   if (!preset) return;
-  const layers = preset.layers.filter((l) => store.layers.includes(l));
-  if (layers.length) state.layers = layers;
-  setParam('layers', state.layers.length === ALL_LAYERS.length ? null : state.layers.join(','));
-  const off = {
+  if (state.view.layered) {
+    const layers = preset.layers.filter((l) => store.layers.includes(l));
+    if (layers.length) state.layers = layers;
+    setParam('layers', state.layers.length === ALL_LAYERS.length ? null : state.layers.join(','));
+  }
+  setOff({
     devices: store.host.ifaces.filter((d) => !preset.device(d)).map((d) => d.name),
     procs: preset.procs ? [] : store.host.procs.map(procKey),
-  };
-  for (const k of Object.keys(off)) if (!off[k].length) delete off[k];
-  if (Object.keys(off).length) state.off[store.netns] = off;
-  else delete state.off[store.netns];
+  });
   save();
   chrome();
   rebuild(false);
   applyFilter({ ...emptyFilter(), ...preset.filter });
 });
-showPreset();
 
 const speedSelect = $('#speed-select');
 for (const rate of SPEED_STEPS) speedSelect.append(new Option(`x${rate}`, String(rate)));

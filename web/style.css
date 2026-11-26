@@ -245,7 +245,10 @@ button.icon svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-line
   .bar { position: relative; }
   main { padding: 12px 12px 0; gap: 12px; }
   .map { padding: 16px 8px 6px; }
-  .verdict { margin-top: 18px; }
+  /* A narrow window has room for fewer words in a line: three lines there. */
+  .verdict { margin-top: 16px; height: 4.35em; }
+  .verdict > span { -webkit-line-clamp: 3; }
+  .verdict.open { min-height: 4.35em; }
   .section-head { min-height: 0; }
 }
 
@@ -317,7 +320,14 @@ main::after { content: ""; flex: 0 0 6px; }
 body:not(.embed) #diagram:not(.compact) { max-width: none; }
 .hint { color: var(--muted); }
 
-.verdict { margin: 26px 0 8px; min-height: 21px; text-align: center; color: var(--muted); }
+/* The outcome of the selected packet. It always takes two lines, so that the
+   page does not move when a short sentence follows a long one. A shorter one
+   sits in the middle of them, and a longer one is cut: the tooltip has all of
+   it, and a click unfolds it. */
+.verdict { margin: 22px 0 8px; height: 2.9em; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); cursor: default; }
+.verdict > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.verdict.open { height: auto; min-height: 2.9em; }
+.verdict.open > span { display: block; }
 .verdict strong { color: var(--ink); }
 .verdict.stopped strong { color: var(--stop); }
 .verdict.done strong { color: var(--ok); }
@@ -664,7 +674,6 @@ body.embed { background: var(--paper); }
 .embed #diagram.compact { min-width: 540px; }
 /* Two lines are reserved for the outcome, so the diagram's box keeps its height.
    A shorter sentence sits in the middle of them, with equal space above and below. */
-.embed .verdict { min-height: 3em; display: flex; align-items: center; justify-content: center; }
 .embed .verdict { margin: 12px 12px 12px; }
 
 /* ?tables= in an embed: the tables sit below the diagram. The diagram keeps its
@@ -674,7 +683,6 @@ body.embed { background: var(--paper); }
 .embed.below #diagram-box { flex: none; }
 .embed.below #diagram { height: auto; max-height: 52vh; }
 .embed.below #diagram.compact { height: auto; max-height: none; }
-.embed.below .verdict { min-height: 21px; }
 
 /* Without ?tables=, the switch of an embed shows the diagram or the tables. */
 .embed.tabular .map { display: none; }

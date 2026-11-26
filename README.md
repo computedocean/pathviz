@@ -19,17 +19,17 @@ The page has one view per layer, and one that puts them together. The switch is 
 
 Every view has a **Namespace** list: PathViz can watch any network namespace of the machine, and the list names them after their containers, pods, or `ip netns` names.
 
-In every diagram, a click on a device, a port, a process, or a hook traces only its traffic, and a second click goes back to tracing everything. A click with Ctrl or Cmd adds to what is traced, or takes one thing out of it. The **Show** controls switch off tables, and single devices, bridges, and processes of a diagram. They change what is drawn, not what is traced.
+In every diagram, a click on a device, a port, a process, or a hook traces only its traffic, and a second click goes back to tracing everything. A click with Ctrl or Cmd adds to what is traced, or takes one thing out of it. The **Show** controls switch off tables, and single devices, bridges, and processes of the diagram on view. They change what is drawn, not what is traced.
 
-A **Preset** sets the filter, the layers, and the devices and processes of the diagrams for a common setup in one pick. Everything it sets can be changed afterwards.
+A **Preset** sets the filter, the layers of the combined view, and the devices and processes of the diagram on view, for a common setup in one pick. Every view offers the presets that fit it, and keeps its own choice of devices and processes: what is hidden in one diagram stays in the others. The filter is the same for all the views. Everything a preset sets can be changed afterwards.
 
-| Preset | Traces | Shows |
-|---|---|---|
-| Everything | All traffic | All layers, every device and process |
-| Local processes | IPv4 | The IP hooks, without bridges and their ports |
-| Router | IPv4 | The device and IP hooks, without loopback, bridges, and processes |
-| Container host | ARP and IPv4 | All layers, without loopback |
-| Bridge only | ARP, IPv4, and other non-IPv6 frames | The device and bridge hooks, with the bridges and their ports only |
+| Preset | Traces | Shows | Offered in |
+|---|---|---|---|
+| Everything | All traffic | All layers, every device and process | All views |
+| Local processes | IPv4 | The IP hooks, without bridges and their ports | L3, L1, Combined |
+| Router | IPv4 | The device and IP hooks, without loopback, bridges, and processes | L3, L1, Combined |
+| Container host | ARP and IPv4 | All layers, without loopback | All views |
+| Bridge only | ARP, IPv4, and other non-IPv6 frames | The device and bridge hooks, with the bridges and their ports only | L2, L1, Combined |
 
 ## How it works
 

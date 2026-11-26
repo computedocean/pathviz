@@ -189,7 +189,8 @@ function build() {
   let y3 = 0, y2 = 0, barY = 0, height = 0;
   if (has3) {
     y3 = Math.max(on.has('l3') ? sockY + SOCK_H + 150 : 44, cardsUp + 4);
-    height = y3 + 34;
+    // Room for the name of the lane under its line.
+    height = y3 + (on.has('l3') ? 56 : 34);
   }
   if (has2) {
     y2 = has3 ? y3 + LANE_GAP : 44;
