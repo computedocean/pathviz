@@ -2,13 +2,13 @@
 // diagram that stays the same from packet to packet.
 //
 // The diagram has two lanes with the same hooks, one above the other. The upper
-// one is the IP stack, between the devices it receives on and sends through.
+// one is the IP layer, between the devices it receives on and sends through.
 // The lower one is the bridge, between its ports. Every lane starts with the
 // ingress hook of its device and ends with the egress hook of it. Two things
 // join the lanes:
 //   - the bridge device (br0): a frame that the bridge passes up (INPUT) goes
 //     around the left side and enters the IP lane like a packet from any other
-//     device, and what the IP stack sends to the bridge device goes around the
+//     device, and what the IP layer sends to the bridge device goes around the
 //     right side to the bridge's OUTPUT;
 //   - br_netfilter: a bridge hook calls the IP hook of the same name while the
 //     frame is in it. The dashed links between the lanes are these calls.
@@ -214,7 +214,7 @@ function build() {
 
   S = { on, y3, y2, barY, sockY, nodes: new Map(), edges: new Map(), cards: { 2: { in: {}, out: {} }, 3: { in: {}, out: {} } }, procs: {}, subs: [], has2, has3 };
   const tracks = el('g'), trails = el('g'), parts = el('g'), marks = el('g');
-  // The bands of the lanes: what belongs to the IP stack and what to the bridge.
+  // The bands of the lanes: what belongs to the IP layer and what to the bridge.
   const band = (top, bottom, name) => svg.append(
     el('rect', { class: 'lane', x: BAND_X, y: top, width: X.W - 2 * BAND_X, height: bottom - top, rx: 10 }),
     el('text', { class: 'lane-name', x: BAND_X + 12, y: top + 17 }, name),
@@ -382,7 +382,7 @@ function build() {
     lane(2, y2, 'l2');
     const mid = (y2 + barY) / 2 + 4;
     const bar = el('rect', { class: 'proc', x: X.in, y: barY, width: X.out - X.in, height: BAR_H, rx: 6 });
-    parts.append(bar, el('text', { class: 'proc-label', x: (X.in + X.out) / 2, y: barY + 17, 'text-anchor': 'middle' }, 'Bridge device: the bridge as a device of the IP stack'));
+    parts.append(bar, el('text', { class: 'proc-label', x: (X.in + X.out) / 2, y: barY + 17, 'text-anchor': 'middle' }, 'Bridge device: the bridge as a device of the network stack'));
     point('BARin', X.DEC, barY, bar);
     point('BARout', X.MRG, barY, bar);
     hook('INPUT2', X.DEC, mid, 'INPUT', 'l2');

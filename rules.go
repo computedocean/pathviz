@@ -16,7 +16,7 @@ const tableName = "pathviz"
 const (
 	L1 = "l1" // the ingress and egress hooks of a device (netdev)
 	L2 = "l2" // the hooks of a bridge (bridge)
-	L3 = "l3" // the hooks of the IP stack (inet)
+	L3 = "l3" // the hooks of the IP layer (inet)
 )
 
 var layerFamily = map[string]string{L1: "netdev", L2: "bridge", L3: "inet"}

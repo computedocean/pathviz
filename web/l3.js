@@ -790,7 +790,7 @@ export default {
   title: 'Packets',
   noun: 'packet',
   layer: 'l3',
-  about: 'The netfilter hooks of the IP stack, with the raw, mangle, nat, and filter stages inside them.',
+  about: 'The netfilter hooks of the IP layer, with the raw, mangle, nat, and filter stages inside them.',
   subs: [{ id: 'stages', label: 'Stages' }, { id: 'hooks', label: 'Hooks only' }],
   // The stages inside the hooks are a detail that can be switched off.
   level: { label: 'Stages', on: 'stages', off: 'hooks', about: 'The raw, mangle, nat, and filter stages inside the hooks, in the diagram and in the table' },

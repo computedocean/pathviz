@@ -1,6 +1,6 @@
 # PathViz
 
-PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the [Netfilter](https://www.netfilter.org/) hooks of the kernel: the points on a packet's way where iptables and nftables rules run. PathViz covers the hooks of all three layers: the ingress and egress hooks of the network devices, the hooks of the Linux bridges, and the hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), with the raw, mangle, nat, and filter stages inside them.
+PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the [Netfilter](https://www.netfilter.org/) hooks of the kernel: the points on a packet's way where iptables and nftables rules run. PathViz covers the hooks of all three layers: the ingress and egress hooks of the network devices, the hooks of the Linux bridges, and the hooks of the IP layer (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), with the raw, mangle, nat, and filter stages inside them.
 
 It helps with questions like these, among others:
 
@@ -50,9 +50,9 @@ PathViz shows the traffic of one network namespace at a time: the host's by defa
 
 | View | What it shows |
 |---|---|
-| **IP · L3** | The five hooks of the IP stack, optionally with the stages inside them, between the network devices and the processes behind the sockets. |
+| **IP · L3** | The five hooks of the IP layer, optionally with the stages inside them, between the network devices and the processes behind the sockets. |
 | **Bridge · L2** | A Linux bridge in two looks: the bridge with its ports and what is behind each port, or the five hooks of the bridge family. The bridge's MAC table is next to it. |
-| **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where Netfilter sees a frame. |
+| **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where Netfilter sees a frame. L1 stands for "at the device" here: the hooks see whole Ethernet frames, not the physical layer. |
 | **Combined** | All of the above on one diagram: the way of a packet from a device, through a bridge if there is one, and up to a socket. It also shows the IP hooks that `br_netfilter` runs inside the bridge hooks. |
 
 
@@ -63,8 +63,8 @@ On its way through the Linux network stack, a packet passes a series of Netfilte
 The hooks, in the order a packet from the network meets them:
 
 - **Network devices** (the `netdev` family): the ingress hook, right after a device received a frame, and the egress hook, right before a device sends one.
-- **Bridges** (the `bridge` family): PREROUTING, INPUT, FORWARD, OUTPUT, and POSTROUTING of a Linux bridge. A frame that arrives on a port of a bridge crosses them before the IP stack sees it, if it sees it at all.
-- **The IP stack** (the `inet` family): the five hooks of the same names, each with its stages: raw, mangle, nat, and filter.
+- **Bridges** (the `bridge` family): PREROUTING, INPUT, FORWARD, OUTPUT, and POSTROUTING of a Linux bridge. A frame that arrives on a port of a bridge crosses them before the rest of the network stack sees it, if it sees it at all.
+- **The IP layer** (the `inet` family, for IPv4 and IPv6): the five hooks of the same names, each with its stages: raw, mangle, nat, and filter.
 
 Under the hood:
 
@@ -86,7 +86,7 @@ At a bridge, the outcome is the bridge's decision:
 - **Delivered** - the frame went up to the network stack above the bridge.
 - **Dropped** - the frame entered a hook and never left it, or left PREROUTING and went nowhere.
 
-In the IP stack:
+In the IP layer:
 
 - **Delivered locally** - the packet reached the end of INPUT.
 - **Sent / Forwarded via `<device>`** - the packet reached the end of POSTROUTING.
