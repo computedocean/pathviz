@@ -173,9 +173,8 @@
   <h3>The layers</h3>
   <ul>
     <li><strong>Device (L1)</strong>: the ingress hook of every network device, right after the device received a frame, and the egress hook, right before the device sends one.</li>
-    <li><strong>Bridge (L2)</strong>: the five hooks of a Linux bridge. They show which ports got a copy of a frame, and why: the bridge looked the destination up in its MAC table or flooded the frame.</li>
+    <li><strong>Bridge (L2)</strong>: the five netfilter hooks of a Linux bridge. They show which ports got a copy of a frame, and why: the bridge looked the destination up in its MAC table or flooded the frame.</li>
     <li><strong>IP (L3)</strong>: the five netfilter hooks of the IP stack and the stages inside them (raw, mangle, nat, filter), where iptables and nftables rules run.</li>
-    <li><strong>Combined</strong>: one packet across all of them, in the order it crossed the hooks.</li>
   </ul>
   <h3>Under the hood</h3>
   <ol>

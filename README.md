@@ -1,65 +1,101 @@
 # PathViz
 
-PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the kernel: through the hooks of the network devices, the bridges, and the IP stack. You can see which hooks a packet crosses, where it gets stopped, how NAT changes it along the way, and which ports of a bridge get a copy of a frame.
+PathViz is a small packet path visualizer for Linux. It shows, live in your browser, how a packet travels through the [Netfilter](https://www.netfilter.org/) hooks of the kernel: the points on a packet's way where iptables and nftables rules run. PathViz covers the hooks of all three layers: the ingress and egress hooks of the network devices, the hooks of the Linux bridges, and the hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), with the raw, mangle, nat, and filter stages inside them.
 
-PathViz is built for learning and demos with a few packets per second. The focus is on accurate, readable visualizations rather than handling large traffic volumes.
+It helps with questions like these, among others:
+
+- Which hooks does a packet cross, and in what order?
+- Where does a packet get dropped: in a firewall rule, or by a routing decision?
+- What does NAT rewrite, and at which stage?
+- Which ports of a bridge get a copy of a frame, and why?
+- Does the IP firewall see the packets that a bridge switches (`br_netfilter`)?
+
+No special setup is needed for a telling picture. Start PathViz on a plain Linux host, on a router, or on a Docker host, and it draws the hooks with what it finds around them: the devices, the bridges and their ports, the containers behind the ports, and the processes with listening sockets. Every packet that matches the filter then leaves a trail on this picture. The [gallery](#gallery) has a few examples.
+
+PathViz only observes: it logs the packets and never changes or stops them. It is built for learning and demos with a few packets per second. The focus is on accurate, readable visualizations rather than handling large traffic volumes.
 
 https://github.com/user-attachments/assets/da465c3e-42d9-4892-99f3-dd930da6c813
 
+## Gallery
+
+### A Linux host
+
+Requests to a web server on the host cross PREROUTING and INPUT and reach the process behind the socket. Requests to a port that a firewall rule blocks stop in the filter stage of INPUT. The replies of the server go through OUTPUT and POSTROUTING.
+
+<!-- Video: pathviz-host.mp4 -->
+
+### A router
+
+Packets for another network cross PREROUTING, FORWARD, and POSTROUTING, from the device they arrive on to the one they leave through. For some of them, a DNAT rule rewrites the destination in the nat stage of PREROUTING, and the stage turns amber.
+
+<!-- Video: pathviz-router.mp4 -->
+
+### A Docker host
+
+The device, bridge, and IP hooks on one diagram, for two containers on Docker's default bridge. A request to a published port arrives on `eth0`, gets its destination rewritten in PREROUTING, is forwarded to `docker0`, and goes around through the bridge device into the bridge hooks and out to the container. Traffic between the two containers stays in the bridge, and with `br_netfilter` loaded, every bridge hook also calls the IP hook of the same name.
+
+<!-- Video: pathviz-docker.mp4 -->
+
+### A Linux bridge
+
+A bridge with four ports, each leading to a network namespace. A broadcast frame floods to all ports. A frame to an address that the bridge has learned goes to one port only. A frame for the bridge itself goes up to the host, and a firewall rule of the bridge family drops a frame on its way.
+
+<!-- Video: pathviz-bridge.mp4 (or pathviz-bridge-fit.mp4, recorded in a narrower page) -->
+
+The host and the router are the [routing demo](demos/routing). The [containers demo](demos/containers) and the [bridges demo](demos/bridges) have richer setups of the other two.
+
 ## The views
 
-The page has one view per layer, and one that puts them together. The switch is in the first line of the header.
+PathViz shows the traffic of one network namespace at a time: the host's by default, or the one of any container, pod, or `ip netns` namespace of the machine. The page has a view per layer, and one that puts them together:
 
 | View | What it shows |
 |---|---|
-| **IP · L3** | The five netfilter hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), the interfaces around them, and the processes behind the sockets. With "Stages" on (under Show), the diagram and the table also have the raw, mangle, nat, and filter stages inside every hook. With it off, a hook is one box. |
-| **Bridge · L2** | What a Linux bridge does with a frame. The look "Topology" draws the bridge, its ports, and what is behind each port: a container, a pod, a namespace, another bridge. The look "Hooks" draws the five hooks of the bridge family, with one trail per copy of a flooded frame. The bridge's MAC table is next to it. |
-| **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where netfilter sees a frame. |
-| **Combined** | One packet across all the layers, on one fixed diagram: the IP hooks between the devices, the bridge hooks between the ports below them, and the device hooks at the ends of both. A frame that a bridge passes up goes around the side, through the bridge device, into the IP hooks. With `br_netfilter` loaded, the path also jumps from a bridge hook to the IP hook of the same name and back. The layers can be switched on and off one by one, and "Stages" (under Show) adds the raw, mangle, nat, and filter stages inside the IP hooks. |
+| **IP · L3** | The five hooks of the IP stack, optionally with the stages inside them, between the network devices and the processes behind the sockets. |
+| **Bridge · L2** | A Linux bridge in two looks: the bridge with its ports and what is behind each port, or the five hooks of the bridge family. The bridge's MAC table is next to it. |
+| **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where Netfilter sees a frame. |
+| **Combined** | All of the above on one diagram: the way of a packet from a device, through a bridge if there is one, and up to a socket. It also shows the IP hooks that `br_netfilter` runs inside the bridge hooks. |
 
-Every view has a **Namespace** list: PathViz can watch any network namespace of the machine, and the list names them after their containers, pods, or `ip netns` names.
-
-In every diagram, a click on a device, a port, a process, or a hook traces only its traffic, and a second click goes back to tracing everything. A click with Ctrl or Cmd adds to what is traced, or takes one thing out of it. The **Show** controls switch off tables, and single devices, bridges, and processes of the diagram on view. They change what is drawn, not what is traced.
-
-A **Preset** sets the filter, the layers of the combined view, and the devices and processes of the diagram on view, for a common setup in one pick. Every view offers the presets that fit it, and keeps its own choice of devices and processes: what is hidden in one diagram stays in the others. The filter is the same for all the views. Everything a preset sets can be changed afterwards.
-
-| Preset | Traces | Shows | Offered in |
-|---|---|---|---|
-| Everything | All traffic | All layers, every device and process | All views |
-| Local processes | IPv4 | The IP hooks, without bridges and their ports | L3, L1, Combined |
-| Router | IPv4 | The device and IP hooks, without loopback, bridges, and processes | L3, L1, Combined |
-| Container host | ARP and IPv4 | All layers, without loopback | All views |
-| Bridge only | ARP, IPv4, and other non-IPv6 frames | The device and bridge hooks, with the bridges and their ports only | L2, L1, Combined |
 
 ## How it works
 
-As a packet travels through the Linux network stack, it passes through a series of netfilter hooks.
-PathViz places probes along this path to record where each packet goes, without modifying or interfering with it.
-It then groups the records belonging to the same packet and lights up the hooks it passed through.
+On its way through the Linux network stack, a packet passes a series of Netfilter hooks. PathViz places probes at these hooks. A probe records that a packet passed by and lets it go on unchanged. PathViz then puts the records of one packet together and lights up the hooks the packet crossed.
+
+The hooks, in the order a packet from the network meets them:
+
+- **Network devices** (the `netdev` family): the ingress hook, right after a device received a frame, and the egress hook, right before a device sends one.
+- **Bridges** (the `bridge` family): PREROUTING, INPUT, FORWARD, OUTPUT, and POSTROUTING of a Linux bridge. A frame that arrives on a port of a bridge crosses them before the IP stack sees it, if it sees it at all.
+- **The IP stack** (the `inet` family): the five hooks of the same names, each with its stages: raw, mangle, nat, and filter.
 
 Under the hood:
 
-1. PathViz creates one nftables table per layer, all named `pathviz`, in the namespace you watch: `netdev pathviz` (devices), `bridge pathviz` (bridges), and `inet pathviz` (IP).
-2. Every table has probe chains at the start and at the end of each hook. The IP table also has one just before each stage (raw, mangle, nat, filter).
+1. PathViz creates one nftables table per layer, all named `pathviz`, in the network namespace you watch: `netdev pathviz`, `bridge pathviz`, and `inet pathviz`.
+2. Every table has probe chains at the start and at the end of each hook. The `inet` table also has one just before each stage.
 3. Each probe logs the packets that match the filter to an NFLOG group and lets them continue unchanged.
 4. The first IP probe that sees a matching packet records its identity using fields such as the IP ID and TCP sequence numbers. Later IP probes use this identity to recognize the packet even if NAT changes its addresses or ports.
 5. PathViz reads the NFLOG records, matches them to individual packets, and reconstructs their paths. If a packet enters a hook or a stage but never reaches the next probe, PathViz marks it as stopped there.
 6. The names around the hooks come from `ip`, `bridge`, `ss`, and the container runtimes (`docker`, `podman`, `crictl`, `ctr`), once a second.
 
-In the IP view, the packet's outcome is determined by the last probe that saw it:
+The outcome of a packet comes from the last probe that saw it.
+
+At a network device, a frame either **passed** the hook or was **dropped** in it.
+
+At a bridge, the outcome is the bridge's decision:
+
+- **Forwarded to `<port>`** - the bridge's MAC table names the port of the destination.
+- **Flooded** - every port got a copy: the frame is a broadcast, or the bridge hasn't learned the destination yet.
+- **Delivered** - the frame went up to the network stack above the bridge.
+- **Dropped** - the frame entered a hook and never left it, or left PREROUTING and went nowhere.
+
+In the IP stack:
 
 - **Delivered locally** - the packet reached the end of INPUT.
 - **Sent / Forwarded via `<device>`** - the packet reached the end of POSTROUTING.
 - **Stopped in `<stage>`** - the packet entered a stage but never came out (e.g., a firewall rule dropped or rejected it).
 - **Lost after `<hook>`** - the packet left a hook but never reached the next one (e.g., because of a missing route or disabled IP forwarding).
 
-In the bridge view, the outcome is the bridge's decision: **forwarded** to the one port its MAC table names, **flooded** to all ports (a broadcast, or a destination the bridge hasn't learned yet), **delivered** to the network stack above the bridge, or **dropped**.
+The **Inspect** view decodes the Ethernet, IP, and TCP/UDP/ICMP headers and the payload, with the fields alongside a hex dump. ARP, DNS, HTTP, TLS handshakes, and DHCP are decoded too.
 
-Each packet also has an **Inspect** button. It opens a detailed view of the Ethernet, IP, and TCP/UDP/ICMP headers and the payload, with decoded fields alongside a hex dump. ARP, DNS, HTTP, TLS handshakes, and DHCP are decoded too.
-
-You can inspect the packet as it appeared at each probe. Fields that changed along the way, such as addresses or ports rewritten by NAT, are highlighted.
-
-PathViz probes coexist with existing iptables, nftables, and Docker rules. Stopping PathViz removes its tables from every namespace it watched. If the process was killed, run `pathviz cleanup` to remove them.
+PathViz probes coexist with existing iptables, nftables, and Docker rules. Stopping PathViz removes its tables from every network namespace it watched. If the process was killed, run `pathviz cleanup` to remove them.
 
 ## Demo
 
@@ -77,7 +113,7 @@ It prints the address of the web UI. The other demos change the network setup of
 |---|---|
 | [`demos/local`](demos/local) | Loopback traffic on one machine |
 | [`demos/routing`](demos/routing) | Local delivery, forwarding, NAT, and a drop in the IP hooks |
-| [`demos/bridges`](demos/bridges) | Bridges made with `ip`: flooding, learning, VLANs, bridges in namespaces of their own |
+| [`demos/bridges`](demos/bridges) | Bridges made with `ip`: flooding, learning, VLANs, bridges in network namespaces of their own |
 | [`demos/containers`](demos/containers) | The bridge networks of Docker, Podman, containerd, and CRI-O, with the names of the containers and pods |
 
 ## Usage
@@ -113,7 +149,7 @@ Open it in a browser on that machine. By default, PathViz shows all traffic unti
 | `--mac <addr>` | Frames from or to these MAC addresses |
 | `--ip <addr\|cidr>` | Packets from or to these addresses, and the ARP messages about them |
 | `--port <port>` | TCP and UDP packets from or to these ports |
-| `--netns <name>` | The namespace to show first: an `ip netns` name, the name of a container or a pod, or `pid:<n>` |
+| `--netns <name>` | The network namespace to show first: an `ip netns` name, the name of a container or a pod, or `pid:<n>` |
 | `--layers l1,l2,l3` | The layers to probe (all three by default) |
 
 `pathviz --help` lists the rest, and `pathviz rules` prints the nftables rules without installing them.
@@ -165,7 +201,7 @@ sudo iptables -I INPUT -p tcp --dport 8080 -j DROP
 # Rewrite the destination port in nat/PREROUTING
 sudo iptables -t nat -I PREROUTING -p tcp --dport 8081 -j REDIRECT --to-ports 8080
 
-# A bridge with two namespaces: an ARP request floods, the reply does not
+# A bridge with two network namespaces: an ARP request floods, the reply does not
 sudo ip link add br0 type bridge && sudo ip link set br0 up
 for n in a b; do
   sudo ip netns add $n
@@ -181,13 +217,13 @@ sudo ip netns exec a ping -c 1 10.9.0.2
 
 PathViz is a learning tool, not a full-featured packet capture system. There are a few things to keep in mind:
 
-- **One namespace per picture.** A view shows the hooks of one network namespace. A packet that goes from a container to the host is one packet in the container's namespace and another one in the host's: switch the Namespace list to follow it.
+- **One network namespace per picture.** A view shows the hooks of one network namespace. A packet that goes from a container to the host is one packet in the container's namespace and another one in the host's: switch the Namespace list to follow it.
 - **NAT and capture filters.** The IP probes keep a packet in view after NAT rewrites it. The device and bridge probes cannot: they see the packet with the addresses it has at that point. So with a filter on an address or a port that NAT rewrites, the Combined view may lack the hooks before or after the rewrite. Filter by something NAT doesn't change, or name both the old and the new value.
 - **Partial paths.** If a packet matches the filter only after NAT changes it, PathViz can show its IP path only from that stage onward.
 - **Egress hook.** Many kernels are built without the egress hook of devices. PathViz then shows where a frame arrives, and not where it leaves.
 - **Before and after netfilter.** XDP and tc run before the ingress hook and after the egress hook, so what they drop or redirect is never seen. A drop inside the bridge itself (a blocked port, VLAN filtering) shows as a frame that passed PREROUTING and went nowhere, without the reason.
 - **Rule visibility.** PathViz shows which hooks and stages a packet crosses, but not which individual firewall rules matched it.
-- **Web UI traffic.** PathViz never traces its own web UI port (7070 by default), in any namespace.
+- **Web UI traffic.** PathViz never traces its own web UI port (7070 by default), in any network namespace.
 - **Process identification.** PathViz uses `ss` to look up the owning process shortly after a packet is seen. Short-lived processes, such as a one-shot `curl`, may have exited by then. Kernel-generated packets, such as TCP RSTs and ICMP replies, have no owning process.
 - **Output interface filtering.** The output interface isn't known yet at PREROUTING. When filtering by output interface, PathViz initially records all packets matching the other filter conditions and keeps only those that later leave through the selected interface.
 - **MAC address filtering.** The IP hooks don't see MAC addresses. With a MAC filter, the IP probes log by the rest of the filter, and PathViz keeps a packet only if a device or bridge probe saw it with one of the addresses.
@@ -208,7 +244,7 @@ The embedded view can be customized through URL parameters. Most of them work in
 | `mode=l3`, `l2`, `l1`, or `all` | Picks the view: IP, bridge, device, or combined. |
 | `sub=hooks` | Picks the look of the view: `stages` or `hooks` for `l3` (the default is `stages`) and for `all` (the default is `hooks`), `topology` or `hooks` for `l2`. `detail=hooks` still works for `l3`. |
 | `layers=l2,l3` | Picks the layers of the combined view. |
-| `netns=<name>` | Picks the namespace, by the same names as `--netns`. |
+| `netns=<name>` | Picks the network namespace, by the same names as `--netns`. |
 | `panels=packets,details` | Shows the selected tables (`packets`, `details`, and for `l2` also `extra`, the MAC table) below the diagram. Without this parameter, the embedded view has a switch that replaces the diagram with the tables. `tables=packets,stages` still works. |
 | `theme=dark` or `theme=light` | Overrides the system color scheme, and the choice made with the switch next to the help button. |
 | `speed=0.5` | Controls packet animation speed, from `0.25` to `2` in steps of `0.25`. The aliases `slow`, `medium`, and `fast` correspond to `0.5`, `1`, and `1.5`. Speed can also be changed in the UI. |
@@ -235,7 +271,7 @@ An embedded view needs an access token, just like the regular UI. You can either
 
 PathViz has two levels of filtering:
 
-- **Capture filter** - configured through command-line flags or the full web UI. It determines which packets PathViz actually traces in a namespace and is shared by all views of that namespace.
+- **Capture filter** - configured through command-line flags or the full web UI. It determines which packets PathViz actually traces in a network namespace and is shared by all views of that namespace.
 - **Display filter** - configured through an embedded view's URL. It selects which of the already captured packets that particular view shows.
 
 This lets you put several embeds on the same page, each showing a different traffic flow.
@@ -252,16 +288,6 @@ The `ip=` parameter also accepts IPv4 prefixes (e.g., `10.0.0.0/8`). IPv6 addres
 ## Development
 
 PathViz is a single Go module with the web UI embedded in the binary. The UI is plain JavaScript modules, with no build step and no dependencies.
-
-| Where | What |
-|---|---|
-| `filter.go`, `rules.go` | The filter and the nftables probes of the three layers |
-| `nflog.go`, `capture.go`, `frame.go`, `packet.go` | Reading the probes' records and decoding what they saw |
-| `journey.go` | Putting the records of one packet together, and the story of every layer |
-| `netns.go`, `inventory.go`, `containers.go`, `host.go`, `sockets.go` | Namespaces, devices, bridges, containers, and sockets |
-| `observer.go`, `server.go`, `main.go` | One observer per watched namespace, the HTTP API, the command line |
-| `web/app.js`, `web/core.js` | The page and what the views share |
-| `web/l3.js`, `web/l2.js`, `web/l1.js`, `web/all.js`, `web/packet.js` | One module per view, and the packet inspector |
 
 PathViz changes firewall tables and reads traffic, so develop and test it on a machine you can throw away. Every demo has a playground for that, with a `dev` machine that has the Go toolchain:
 

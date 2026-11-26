@@ -228,6 +228,16 @@ button.icon svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-line
 .menu-all { display: flex; gap: 4px; padding: 0 0 6px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 .viewline .rowbody .menu-all button { height: 22px; padding: 0 8px; }
 
+/* A window of medium width: the controls of the diagram move closer together,
+   so that the row of the combined view, the longest one, stays one line. */
+@media (max-width: 1400px) {
+  .viewline .rowbody { column-gap: 9px; }
+  .viewline .group { gap: 5px; }
+  .viewline .rowbody button, .viewline summary { padding-left: 7px; padding-right: 7px; }
+  .viewline select { padding-left: 6px; padding-right: 22px; background-position: calc(100% - 11px) 55%, calc(100% - 6px) 55%; }
+  .toggles, .menus { gap: 3px; }
+}
+
 /* A narrow window: every row keeps what is used most. The name of a row turns
    into a button that unfolds the rest. It looks like a heading with a mark and
    not like a field, because it is neither a filter nor an option itself. */

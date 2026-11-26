@@ -497,5 +497,5 @@ export function describeFilter(f) {
     return names.length ? `${words} ${either(names)}` : '';
   }).filter(Boolean);
   if (dirs.length) parts.push(dirs.join(' or '));
-  return `Tracing ${[subject, ...parts].join(', ').replace(', ', ' ')}.`;
+  return `Tracing ${subject}${parts.length ? ` ${parts.join(', ')}` : ''}.`;
 }
