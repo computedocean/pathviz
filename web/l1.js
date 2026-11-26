@@ -172,7 +172,7 @@ function cells(item) {
 
 // detail lists the device hooks the frame crossed.
 function detail(item) {
-  const d = { title: 'Hooks of the selected frame', columns: ['Device', 'Hook', 'Other end', 'Outcome', 'Elapsed'], empty: 'Select a frame to see which device hooks it crossed.', summary: '', rows: [] };
+  const d = { title: 'Path of the selected frame', columns: ['Device', 'Hook', 'Other end', 'Outcome', 'Elapsed'], empty: 'Select a frame to see which device hooks it crossed.', summary: '', rows: [] };
   if (!item) return d;
   const f = item.frame;
   d.summary = f ? [f.type, f.info].filter(Boolean).join(', ') : '';
@@ -200,7 +200,7 @@ export default {
   layer: 'l1',
   about: 'The ingress and egress hooks of the network devices: the first and the last point where a frame can be seen.',
   subs: [],
-  panels: [{ id: 'packets', label: 'Frames' }, { id: 'details', label: 'Hooks' }],
+  panels: [{ id: 'packets', label: 'Frames' }, { id: 'details', label: 'Path' }],
   aria: 'The network devices, their hooks, and the way of the selected frame',
   init(context) { ctx = context; },
   items,

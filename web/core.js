@@ -6,8 +6,9 @@ export const $ = (sel) => document.querySelector(sel);
 
 // What a page shows comes from its URL, so that a view can be embedded:
 //   ?mode=l3|l2|l1|all  the layer: IP hooks, bridge hooks, device hooks, or all
-//   ?sub=<name>         the look of the layer: stages or hooks for l3, topology
-//                       or hooks for l2 (?detail=hooks still means l3 hooks)
+//   ?sub=<name>         the look of the layer: stages or hooks for l3 and all,
+//                       topology or hooks for l2 (?detail=hooks still means
+//                       l3 hooks)
 //   ?layers=l2,l3       the layers of the combined view
 //   ?netns=<name>       the network namespace to watch
 //   ?bridges=br0,br1    only these bridges (l2)

@@ -40,7 +40,7 @@ const urlPanels = (() => {
 const state = {
   view: VIEWS.find((v) => v.id === params.get('mode')) || l3,
   // subs is the look of every layer that has several.
-  subs: { l3: 'stages', l2: 'topology', ...saved.subs },
+  subs: { l3: 'stages', l2: 'topology', all: 'hooks', ...saved.subs },
   // layers are the layers of the combined view.
   layers: saved.layers || ALL_LAYERS,
   // hidden are the tables that are switched off, per layer.
@@ -160,14 +160,18 @@ function chrome() {
     return b;
   }));
 
-  $('#sub-group').hidden = v.subs.length === 0 || embed;
-  $('#sub-switch').replaceChildren(...v.subs.map((s) => switchButton(s.label, s.id === sub(), () => {
-    state.subs[v.id] = s.id;
-    setParam('sub', s.id === v.subs[0].id ? null : s.id);
+  // The looks of a view are a switch of their own (two diagrams of the bridge),
+  // or a level of detail: then they are a button among the things to show.
+  const pickSub = (id) => {
+    state.subs[v.id] = id;
+    setParam('sub', id === v.subs[0].id ? null : id);
     save();
     chrome();
     relist();
-  })));
+  };
+  $('#sub-group').hidden = v.subs.length === 0 || !!v.level || embed;
+  $('#sub-switch').replaceChildren(...(v.level ? [] : v.subs).map((s) => switchButton(s.label, s.id === sub(), () => pickSub(s.id))));
+  $('#detail-switch').replaceChildren(...(v.level ? [switchButton(v.level.label, sub() === v.level.on, () => pickSub(sub() === v.level.on ? v.level.off : v.level.on), v.level.about)] : []));
 
   $('#layer-group').hidden = !v.layered || embed;
   $('#layer-switch').replaceChildren(...ALL_LAYERS.filter((l) => store.layers.includes(l) || !store.layers.length).reverse().map((l) => switchButton(l.toUpperCase(), state.layers.includes(l), () => {

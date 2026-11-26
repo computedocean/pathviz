@@ -12,10 +12,10 @@ The page has one view per layer, and one that puts them together. The switch is 
 
 | View | What it shows |
 |---|---|
-| **IP · L3** | The five netfilter hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), the interfaces around them, and the processes behind the sockets. The look "Stages" also shows the raw, mangle, nat, and filter stages inside every hook, and "Hooks only" draws one box per hook. |
+| **IP · L3** | The five netfilter hooks of the IP stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING), the interfaces around them, and the processes behind the sockets. With "Stages" on (under Show), the diagram and the table also have the raw, mangle, nat, and filter stages inside every hook. With it off, a hook is one box. |
 | **Bridge · L2** | What a Linux bridge does with a frame. The look "Topology" draws the bridge, its ports, and what is behind each port: a container, a pod, a namespace, another bridge. The look "Hooks" draws the five hooks of the bridge family, with one trail per copy of a flooded frame. The bridge's MAC table is next to it. |
 | **Device · L1** | The ingress and egress hooks of every network device: the first and the last point where netfilter sees a frame. |
-| **Combined** | One packet across all the layers, on one fixed diagram: the IP hooks between the devices, the bridge hooks between the ports below them, and the device hooks at the ends of both. A frame that a bridge passes up goes around the side, through the bridge device, into the IP hooks. With `br_netfilter` loaded, the path also jumps from a bridge hook to the IP hook of the same name and back. The layers can be switched on and off one by one. |
+| **Combined** | One packet across all the layers, on one fixed diagram: the IP hooks between the devices, the bridge hooks between the ports below them, and the device hooks at the ends of both. A frame that a bridge passes up goes around the side, through the bridge device, into the IP hooks. With `br_netfilter` loaded, the path also jumps from a bridge hook to the IP hook of the same name and back. The layers can be switched on and off one by one, and "Stages" (under Show) adds the raw, mangle, nat, and filter stages inside the IP hooks. |
 
 Every view has a **Namespace** list: PathViz can watch any network namespace of the machine, and the list names them after their containers, pods, or `ip netns` names.
 
@@ -206,7 +206,7 @@ The embedded view can be customized through URL parameters. Most of them work in
 |---|---|
 | `view=embed` | Shows a compact, read-only diagram with the packet outcome. Of the header, only the speed and the connection badge remain. The filter fields and tables are hidden, and nothing in the diagram is clickable. |
 | `mode=l3`, `l2`, `l1`, or `all` | Picks the view: IP, bridge, device, or combined. |
-| `sub=hooks` | Picks the look of the view: `stages` or `hooks` for `l3`, `topology` or `hooks` for `l2`. `detail=hooks` still works for `l3`. |
+| `sub=hooks` | Picks the look of the view: `stages` or `hooks` for `l3` (the default is `stages`) and for `all` (the default is `hooks`), `topology` or `hooks` for `l2`. `detail=hooks` still works for `l3`. |
 | `layers=l2,l3` | Picks the layers of the combined view. |
 | `netns=<name>` | Picks the namespace, by the same names as `--netns`. |
 | `panels=packets,details` | Shows the selected tables (`packets`, `details`, and for `l2` also `extra`, the MAC table) below the diagram. Without this parameter, the embedded view has a switch that replaces the diagram with the tables. `tables=packets,stages` still works. |

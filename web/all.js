@@ -133,13 +133,17 @@ function onLayers() {
 // The columns of the diagram. Both lanes use them, so that a hook of the
 // bridge sits right under the IP hook of the same name.
 const X = {
-  loopL: 20, cardL: 124, busL: 230, in: 262, ING: 354, PRE: 504, DEC: 624, FWD: 754, MRG: 884, POST: 1004,
-  EGR: 1154, out: 1246, busR: 1278, cardR: 1384, loopR: 1488, W: 1508,
+  loopL: 20, cardL: 124, busL: 230, in: 262, ING: 350, PRE: 520, DEC: 646, FWD: 776, MRG: 906, POST: 1026,
+  EGR: 1186, out: 1278, busR: 1310, cardR: 1416, loopR: 1520, W: 1540,
 };
 const NIC = { w: 148, h: 34, step: 42, max: 8 };
 const PROC = { w: 180, h: 40, gap: 12, max: 5 };
 const BOX = { w: 150, h: 44, small: 110 };
 const LANE_GAP = 120, SOCK_H = 22, BAR_H = 26;
+// The chips of the stages inside an IP hook, in the look "Stages".
+const CHIP = { w: 52, h: 24, dx: 58, dy: 38 };
+const withStages = () => ctx.sub() === 'stages';
+const stagesOf = (name) => ((store.hooks.find((h) => h.name === name) || {}).stages || []).map((x) => x.name);
 const HOOK_KEY = { INGRESS: 'ING', EGRESS: 'EGR', PREROUTING: 'PRE', FORWARD: 'FWD', POSTROUTING: 'POST', INPUT: 'INPUT', OUTPUT: 'OUTPUT' };
 
 const isPort = (dev) => !!dev.master;
@@ -188,7 +192,8 @@ function build() {
   const cardsUp = (Math.max(cards3.length, 1) - 1) * NIC.step + NIC.h / 2 + 26 + (more3 ? 18 : 0);
   let y3 = 0, y2 = 0, barY = 0, height = 0;
   if (has3) {
-    y3 = Math.max(on.has('l3') ? sockY + SOCK_H + 150 : 44, cardsUp + 4);
+    // With the stages, INPUT and OUTPUT are columns of chips and need more height.
+    y3 = Math.max(on.has('l3') ? sockY + SOCK_H + (withStages() ? 246 : 150) : 44, cardsUp + 4);
     // Room for the name of the lane under its line.
     height = y3 + (on.has('l3') ? 56 : 34);
   }
@@ -217,7 +222,32 @@ function build() {
     S.edges.get(a).push(b);
     track([S.nodes.get(a).at, S.nodes.get(b).at], cls);
   };
+  // stageHook draws an IP hook as a box with a chip per stage. The chips are
+  // on the line of the hook, in the order a packet passes them: along the x
+  // axis (dx) or the y axis (dy, negative for a packet that travels upwards).
+  const stageHook = (key, x, y, name, dx, dy) => {
+    const names = stagesOf(name);
+    const n = names.length;
+    const at = (i) => [x + dx * (i - (n - 1) / 2), y + dy * (i - (n - 1) / 2)];
+    const halfW = Math.abs(dx) * (n - 1) / 2 + CHIP.w / 2 + 10, halfH = Math.abs(dy) * (n - 1) / 2 + CHIP.h / 2 + 12;
+    parts.append(el('rect', { class: 'hookbox', x: x - halfW, y: y - halfH, width: 2 * halfW, height: 2 * halfH, rx: 10 }));
+    if (dx) parts.append(el('text', { class: 'hookname', x, y: y - halfH - 8, 'text-anchor': 'middle' }, name));
+    else if (name === 'INPUT') parts.append(el('text', { class: 'hookname', x: x - halfW - 10, y: y + 4, 'text-anchor': 'end' }, name));
+    else parts.append(el('text', { class: 'hookname', x: x + halfW + 10, y: y + 4 }, name));
+    const chips = {};
+    names.forEach((stage, i) => {
+      const [cx, cy] = at(i);
+      const g = el('g', { class: 'chip' });
+      g.append(el('rect', { x: cx - CHIP.w / 2, y: cy - CHIP.h / 2, width: CHIP.w, height: CHIP.h, rx: CHIP.h / 2 }), el('text', { x: cx, y: cy + 4, 'text-anchor': 'middle' }, stage));
+      parts.append(g);
+      chips[stage] = { el: g, at: [cx, cy] };
+    });
+    point(key, x, y, null, true);
+    Object.assign(S.nodes.get(key), { chips, across: !!dx });
+    return halfH;
+  };
   const hook = (key, x, y, name, layer, small) => {
+    if (layer === 'l3' && on.has('l3') && withStages()) { stageHook(key, x, y, name, CHIP.dx, 0); return; }
     if (!on.has(layer)) { point(key, x, y); return; }
     const g = drawHook(parts, x, y, name, small ? 'device hook' : '', small ? BOX.small : BOX.w, BOX.h);
     if (small) S.subs.push(g.querySelector('.hooksub'));
@@ -288,11 +318,18 @@ function build() {
       parts.append(bar, el('text', { class: 'proc-label', x: (X.in + X.out) / 2, y: sockY + 15, 'text-anchor': 'middle' }, 'Sockets'));
       point('SOCKin', X.DEC, sockY + SOCK_H, bar);
       point('SOCKout', X.MRG, sockY + SOCK_H, bar);
-      hook('INPUT3', X.DEC, mid, 'INPUT', 'l3');
-      hook('OUTPUT3', X.MRG, mid, 'OUTPUT', 'l3');
+      // A packet goes up through INPUT and down through OUTPUT.
+      let inHalf = BOX.h / 2, outHalf = BOX.h / 2;
+      if (withStages()) {
+        inHalf = stageHook('INPUT3', X.DEC, mid, 'INPUT', 0, -CHIP.dy);
+        outHalf = stageHook('OUTPUT3', X.MRG, mid, 'OUTPUT', 0, CHIP.dy);
+      } else {
+        hook('INPUT3', X.DEC, mid, 'INPUT', 'l3');
+        hook('OUTPUT3', X.MRG, mid, 'OUTPUT', 'l3');
+      }
       line('DEC3', 'INPUT3'); line('INPUT3', 'SOCKin'); line('SOCKout', 'OUTPUT3'); line('OUTPUT3', 'MRG3');
-      arrow(X.DEC, (mid + BOX.h / 2 + y3) / 2 - 4, -90);
-      arrow(X.MRG, (mid + BOX.h / 2 + y3) / 2 + 6, 90);
+      arrow(X.DEC, (mid + inHalf + y3) / 2 - 4, -90);
+      arrow(X.MRG, (mid + outHalf + y3) / 2 + 6, 90);
       label(X.DEC + 14, y3 - 30, 'routing', 'start');
       const rowW = procs.length * (PROC.w + PROC.gap) - PROC.gap;
       procs.forEach((proc, i) => {
@@ -341,7 +378,7 @@ function build() {
     for (const n of ['PRE', 'FWD', 'POST']) {
       S.edges.get(`${n}2`).push(`${n}3`);
       S.edges.get(`${n}3`).push(`${n}2`);
-      if (on.has('l2') && on.has('l3')) track([[X[n], y2 - BOX.h / 2], [X[n], y3 + BOX.h / 2]], 'loop');
+      if (on.has('l2') && on.has('l3')) track([[X[n], y2 - BOX.h / 2], [X[n], y3 + (withStages() ? CHIP.h / 2 + 12 : BOX.h / 2)]], 'loop');
     }
     if (on.has('l2') && on.has('l3')) label(X.FWD + 10, (y2 + y3) / 2 + 4, 'br_netfilter', 'start');
     // The bridge devices are among the devices of the IP lane. The bar of the
@@ -398,12 +435,18 @@ function trace(j, p) {
   // and came back in on the other.
   const stops = [];
   let cur = null, gap = false;
+  // inBox is the box of stages the trail is in, when it stopped at a chip
+  // that is not in the middle of the box.
+  let inBox = null;
   const push = (at, node, cls) => { stops.push({ at, node, cls: cls || 'lit', gap }); gap = false; };
   const walk = (to) => {
     const path = cur === null ? [to] : way(cur, to);
     if (!path) return false;
     for (const key of cur === null ? path : path.slice(1)) {
       const n = S.nodes.get(key);
+      // The line of a box of stages is left sideways from its middle only.
+      if (inBox && (inBox.across ? n.at[1] !== inBox.at[1] : n.at[0] !== inBox.at[0])) push(inBox.at);
+      inBox = null;
       // A box on the way lights up only when one of its probes saw the packet.
       push(n.at, n.box ? null : n.el);
     }
@@ -477,11 +520,28 @@ function trace(j, p) {
       }
     }
     if (!walk(key)) { gap = true; cur = null; walk(key); }
-    const stop = stops[stops.length - 1];
-    stop.node = n.el;
+    let stop = stops[stops.length - 1];
     const stopped = end.box === box && i === p.seq.length - 1;
-    stop.cls = `lit${box.hops.some((x) => x.h.rewrote) ? ' rewrote' : ''}${stopped ? ' stopped' : ''}`;
-    if (stopped) stop.mark = [n.at[0] + (box.layer === 'l1' ? BOX.small : BOX.w) / 2 - 4, n.at[1] - BOX.h / 2 + 4];
+    if (n.chips) {
+      // A box of stages: the trail goes from chip to chip, and lights up the
+      // ones whose probes saw the packet. It came in along the line of the
+      // chips, or from the side (br_netfilter) into the middle of the box.
+      const before = stops[stops.length - 2];
+      if (before && !stop.gap && (n.across ? before.at[1] === n.at[1] : before.at[0] === n.at[0])) stops.pop();
+      const seen = box.hops.filter((x) => !x.h.exit && n.chips[x.h.stage]);
+      seen.forEach((x, at) => {
+        const chip = n.chips[x.h.stage];
+        const dead = stopped && at === seen.length - 1;
+        push(chip.at, chip.el, `lit${x.h.rewrote ? ' rewrote' : ''}${dead ? ' stopped' : ''}`);
+        if (dead) stops[stops.length - 1].mark = [chip.at[0] + CHIP.w / 2 + 2, chip.at[1] - CHIP.h / 2 + 2];
+      });
+      inBox = n;
+      stop = stops[stops.length - 1];
+    } else {
+      stop.node = n.el;
+      stop.cls = `lit${box.hops.some((x) => x.h.rewrote) ? ' rewrote' : ''}${stopped ? ' stopped' : ''}`;
+      if (stopped) stop.mark = [n.at[0] + (box.layer === 'l1' ? BOX.small : BOX.w) / 2 - 4, n.at[1] - BOX.h / 2 + 4];
+    }
     // The device hook tells which device it is of this time.
     const sub = n.el && n.el.querySelector('.hooksub');
     if (sub && box.layer === 'l1') stop.sub = [sub, h.in || h.out];
@@ -591,7 +651,7 @@ function cells(item) {
 
 // detail lists every probe that saw the packet on the path on view.
 function detail(item) {
-  const d = { title: 'Hooks of the selected packet', columns: ['Layer', 'Hook', 'In', 'Out', 'Source', 'Destination', 'Elapsed'], empty: 'Select a packet to see every probe that saw it.', summary: '', rows: [] };
+  const d = { title: 'Path of the selected packet', columns: ['Layer', 'Hook', 'In', 'Out', 'Source', 'Destination', 'Elapsed'], empty: 'Select a packet to see every probe that saw it.', summary: '', rows: [] };
   if (!item) return d;
   const j = item.j;
   d.summary = j.proto ? [j.proto.toUpperCase(), j.info, `${j.len} bytes`].filter(Boolean).join(', ') : j.frame ? [j.frame.type, j.frame.info].filter(Boolean).join(', ') : '';
@@ -599,17 +659,30 @@ function detail(item) {
   const line = lineage(j, shown === j ? leaf : defaultLeaf(j));
   const hops = j.hops.filter((h) => line.has(h.copy || 0) && on.has(h.layer));
   const end = ending(j, plan(j, shown === j ? leaf : defaultLeaf(j), on));
-  hops.forEach((h, i) => {
-    const name = h.layer === 'l3'
-      ? (h.exit ? `left ${h.hook}` : `${h.stage}/${h.hook}`)
-      : `${h.exit ? 'left' : 'entered'} ${h.hook}${h.layer === 'l2' ? ` of ${h.bridge}` : ''}`;
+  // Without the stages, the probes of one pass through an IP hook are one row.
+  const rows = [];
+  for (const h of hops) {
+    const prev = rows[rows.length - 1];
+    if (!withStages() && h.layer === 'l3' && prev && prev.first.layer === 'l3' && prev.first.hook === h.hook && !prev.last.exit) {
+      prev.hops.push(h);
+      prev.last = h;
+    } else rows.push({ first: h, last: h, hops: [h] });
+  }
+  rows.forEach((r, i) => {
+    const h = r.first;
+    const whole = !withStages() && h.layer === 'l3';
+    const name = whole ? h.hook
+      : h.layer === 'l3' ? (h.exit ? `left ${h.hook}` : `${h.stage}/${h.hook}`)
+        : `${h.exit ? 'left' : 'entered'} ${h.hook}${h.layer === 'l2' ? ` of ${h.bridge}` : ''}`;
     const ip = h.layer === 'l3' || !h.smac;
+    const out = [...r.hops].reverse().find((x) => x.pout || x.out);
     const row = {
-      cells: [[h.layer.toUpperCase(), 'mono'], [name, 'mono wrap'], [h.pin || h.in || '', 'mono'], [h.pout || h.out || '', 'mono'], [(ip ? h.src : h.smac) || '', 'mono'], [(ip ? h.dst : h.dmac) || '', 'mono'], [micros(h.us), 'mono']],
-      cls: h.exit ? 'exit' : '', notes: [],
+      cells: [[h.layer.toUpperCase(), 'mono'], [name, 'mono wrap'], [h.pin || h.in || '', 'mono'], [out ? out.pout || out.out : '', 'mono'], [(ip ? h.src : h.smac) || '', 'mono'], [(ip ? h.dst : h.dmac) || '', 'mono'], [micros(h.us), 'mono']],
+      cls: !whole && h.exit ? 'exit' : '', notes: [],
     };
-    if (h.rewrote) { row.cls += ' rewrote'; row.notes.push(`This stage rewrote the ${h.rewrote}.`); }
-    if (i === hops.length - 1 && end.kind === 'stopped') {
+    const rewrites = r.hops.filter((x) => x.rewrote).map((x) => x.rewrote);
+    if (rewrites.length) { row.cls += ' rewrote'; row.notes.push(`This ${whole ? 'hook' : 'stage'} rewrote the ${rewrites.join(', ')}.`); }
+    if (i === rows.length - 1 && end.kind === 'stopped') {
       row.cls += ' stopped';
       row.notes.push(end.lost ? 'The packet was not seen after this point.' : 'The packet did not leave this hook.');
     }
@@ -625,10 +698,12 @@ export default {
   noun: 'packet',
   layer: '',
   about: 'One packet across the device, bridge, and IP hooks, on one diagram.',
-  subs: [],
+  // The IP hooks as one box each, or with the stages inside them (see level).
+  subs: [{ id: 'hooks', label: 'Hooks only' }, { id: 'stages', label: 'Stages' }],
   // The layers of this view can be switched on and off one by one.
   layered: true,
-  panels: [{ id: 'packets', label: 'Packets' }, { id: 'details', label: 'Hooks' }],
+  level: { label: 'Stages', on: 'stages', off: 'hooks', about: 'The raw, mangle, nat, and filter stages inside the IP hooks, in the diagram and in the table' },
+  panels: [{ id: 'packets', label: 'Packets' }, { id: 'details', label: 'Path' }],
   aria: 'The hooks of all the layers, the devices around them, and the path of the selected packet',
   init(context) { ctx = context; },
   items: (j) => [{ id: `${j.id}`, j, time: j.time }],

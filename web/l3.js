@@ -722,7 +722,7 @@ function hopCells(hop, prev, out) {
 function detail(j) {
   const byHook = hooksOnly();
   const d = {
-    title: byHook ? 'Hooks of the selected packet' : 'Stages of the selected packet',
+    title: 'Path of the selected packet',
     columns: [byHook ? 'Hook' : 'Stage', ...DETAIL_COLUMNS],
     empty: byHook ? 'Select a packet to see what every hook saw.' : 'Select a packet to see what every stage saw.',
     summary: '', rows: [],
@@ -792,7 +792,9 @@ export default {
   layer: 'l3',
   about: 'The netfilter hooks of the IP stack, with the raw, mangle, nat, and filter stages inside them.',
   subs: [{ id: 'stages', label: 'Stages' }, { id: 'hooks', label: 'Hooks only' }],
-  panels: [{ id: 'packets', label: 'Packets' }, { id: 'details', label: 'Stages' }],
+  // The stages inside the hooks are a detail that can be switched off.
+  level: { label: 'Stages', on: 'stages', off: 'hooks', about: 'The raw, mangle, nat, and filter stages inside the hooks, in the diagram and in the table' },
+  panels: [{ id: 'packets', label: 'Packets' }, { id: 'details', label: 'Path' }],
   aria: 'Netfilter hooks and the path of the selected packet',
   init(context) { ctx = context; },
   items,
